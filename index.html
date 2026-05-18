@@ -30466,8 +30466,12 @@ function _finRevenue(db, fromD, toD, branchId=null, mode=null) {
   }
   return out;
 }
-function _finCOGS(db, fromD, toD, branchId=null, mode=null) {
-  const out = { total:0, items:[] };
+function _finCOGS(db, fromD, toD, branchId=null, mode=null, costBasis='WAC') {
+  // 🆕 PATCH 26 (2026-05-16): costBasis = 'WAC' (default, official P&L) | 'DEAL' (management compare view)
+  //   WAC: ใช้ bill.totalCost (= sum(WAC × qty) จากตอน save SB) — สำหรับปิดงบจริง
+  //   DEAL: สำหรับ dual-costing items ที่ allocate แล้ว → ใช้ item.dealCost แทน — สำหรับ dashboard ผู้บริหาร
+  //   หมวดอื่น + TRADING ใน DEAL mode ใช้ค่าเดียวกับ WAC mode (ไม่กระทบ)
+  const out = { total:0, items:[], dualReplacedCount:0, dualReplacedAmt:0 };
   // 🚫 Pre-Go-Live cutoff — exclude opening bills (รวมใน historicalMonthly แล้ว)
   const _goLive = (db.openingBalance && db.openingBalance.goLiveDate) || '2026-05-01';
   const _isOpening = (b) => b && (b.status === 'opening' || b.isOpening === true || String(b.id||'').startsWith('SB-OPN-') || (b.date && b.date < _goLive));
@@ -30480,13 +30484,34 @@ function _finCOGS(db, fromD, toD, branchId=null, mode=null) {
     })
     .forEach(b => {
       let c = 0;
+      let billDualReplaced = false, billDualDiff = 0;
       if (b.transactionMode === 'TRADING') {
         c = window.$erp.tradingMatchedCost(b.id);
+      } else if (costBasis === 'DEAL') {
+        // 🆕 PATCH 26: Deal Cost view — แทน WAC ของ dual-costing items ที่ allocate แล้ว ด้วย dealCost
+        const wacTotal = Number(b.totalCost||0);
+        c = _trkSafe(b.items).reduce((s, it) => {
+          if (!it) return s;
+          const itemWac = Number(it.totalCost || 0);
+          if (it.productId && window.$erp.isDualCostingProduct && window.$erp.isDualCostingProduct(it.productId)) {
+            const itemDeal = Number(it.dealCost || 0);
+            if (itemDeal > 0.001) {
+              billDualReplaced = true;
+              billDualDiff += (itemDeal - itemWac);
+              return s + itemDeal;
+            }
+          }
+          return s + itemWac;
+        }, 0);
+        if (billDualReplaced) {
+          out.dualReplacedCount++;
+          out.dualReplacedAmt += billDualDiff;
+        }
       } else {
-        c = Number(b.totalCost||0);
+        c = Number(b.totalCost||0);   // WAC mode (default)
       }
       out.total += c;
-      out.items.push({ id:b.id, date:b.date, no:b.docNo, party:b.customerId, amt:c, ref:'SB', mode:b.transactionMode||'STOCK' });
+      out.items.push({ id:b.id, date:b.date, no:b.docNo, party:b.customerId, amt:c, ref:'SB', mode:b.transactionMode||'STOCK', dualReplaced: billDualReplaced });
     });
   // 🆕 รวม Historical COGS (ก่อน Go-Live) — company-level
   if (!mode || mode === null) {
@@ -32767,6 +32792,8 @@ app.component('view-plStatement', {
     const selYear = ref(String(new Date().getFullYear()));
     const branchId = ref('');
     const txnModeFilter = ref('');  // '' = ALL | 'STOCK' | 'TRADING'
+    // 🆕 PATCH 26 (2026-05-16): Cost basis toggle — WAC (ปิดงบจริง) vs DEAL (management compare)
+    const costBasisView = ref('WAC');  // 'WAC' | 'DEAL' | 'COMPARE'
     const drill = ref(null);
 
     /* Effective from/to based on viewMode */
@@ -32787,17 +32814,23 @@ app.component('view-plStatement', {
     function computeFor(fromX, toX) {
       const mode = txnModeFilter.value || null;
       const rev = _finRevenue(db, fromX, toX, branchId.value, mode);
-      const cogs = _finCOGS(db, fromX, toX, branchId.value, mode);
-      // Trading split (only computed when mode is null = ALL)
+      // 🆕 PATCH 26 (2026-05-16): คำนวณ 2 แบบ — WAC (ปิดงบจริง) + DEAL (management compare)
+      const cogs_wac  = _finCOGS(db, fromX, toX, branchId.value, mode, 'WAC');
+      const cogs_deal = _finCOGS(db, fromX, toX, branchId.value, mode, 'DEAL');
+      // Trading split
       const stockRev = _finRevenue(db, fromX, toX, branchId.value, 'STOCK');
-      const stockCogs = _finCOGS(db, fromX, toX, branchId.value, 'STOCK');
+      const stockCogs_wac  = _finCOGS(db, fromX, toX, branchId.value, 'STOCK', 'WAC');
+      const stockCogs_deal = _finCOGS(db, fromX, toX, branchId.value, 'STOCK', 'DEAL');
       const tradingRev = _finRevenue(db, fromX, toX, branchId.value, 'TRADING');
-      const tradingCogs = _finCOGS(db, fromX, toX, branchId.value, 'TRADING');
+      const tradingCogs = _finCOGS(db, fromX, toX, branchId.value, 'TRADING');   // TRADING ไม่กระทบจาก costBasis
       const exp = _finExpenses(db, fromX, toX, branchId.value);
       const dep = _finDepreciation(db, fromX, toX, branchId.value);
       const intExp = _finInterestExp(db, fromX, toX);
       const fxItems = _trkSafe(db.fxGainLoss).filter(f => f && f.date>=fromX && f.date<=toX);
       const fxNet = fxItems.reduce((s,f)=>s+Number(f.gainLoss||0),0);
+      // Pick active cogs based on UI toggle
+      const cogs = costBasisView.value === 'DEAL' ? cogs_deal : cogs_wac;
+      const stockCogs = costBasisView.value === 'DEAL' ? stockCogs_deal : stockCogs_wac;
       const grossProfit = rev.net - cogs.total;
       const opExp = exp.total + dep.total;
       const opProfit = grossProfit - opExp;
@@ -32809,13 +32842,22 @@ app.component('view-plStatement', {
         const cat = _trkSafe(db.expenseCategories).find(x=>x && x.id===catId);
         expByCat[cat?.name || catId] = amt;
       });
-      // Stock vs Trading split
       const stockGP = stockRev.net - stockCogs.total;
       const tradingGP = tradingRev.net - tradingCogs.total;
       const tradingUnmatched = _trkSafe(db.salesBills).filter(b => b && b.transactionMode === 'TRADING' && b.status !== 'cancelled' && b.date >= fromX && b.date <= toX)
         .reduce((s,b)=>s+(Number(b.totalAmount||0) - window.$erp.tradingMatchedCost(b.id)), 0);
+      // 🆕 PATCH 26: Compare deltas — สิ่งที่ Deal Cost view เห็น vs WAC view
+      const cogs_diff = cogs_deal.total - cogs_wac.total;     // > 0 = Deal cost สูงกว่า WAC (= management GP ต่ำกว่า WAC GP)
+      const gp_wac    = rev.net - cogs_wac.total;
+      const gp_deal   = rev.net - cogs_deal.total;
+      const gp_diff   = gp_deal - gp_wac;                      // = -cogs_diff
+      const np_wac    = gp_wac  - opExp - intExp.total + fxNet;
+      const np_deal   = gp_deal - opExp - intExp.total + fxNet;
       return { rev, cogs, exp, expByCat, dep, intExp, fxNet, fxItems, grossProfit, opExp, opProfit, netProfit, gpPct, npPct,
-        stockRev, stockCogs, stockGP, tradingRev, tradingCogs, tradingGP, tradingUnmatched };
+        stockRev, stockCogs, stockGP, tradingRev, tradingCogs, tradingGP, tradingUnmatched,
+        // 🆕 PATCH 26: dual view fields
+        cogs_wac, cogs_deal, gp_wac, gp_deal, gp_diff, cogs_diff, np_wac, np_deal,
+        dualReplacedCount: cogs_deal.dualReplacedCount || 0 };
     }
 
     const data = computed(() => computeFor(effRange.value.from, effRange.value.to));
@@ -32986,6 +33028,7 @@ app.component('view-plStatement', {
     });
 
     return { erp, db, fmt, viewMode, fromD, toD, selMonth, selYear, branchId, txnModeFilter,
+      costBasisView,    // 🆕 PATCH 26: cost basis toggle
       effRange, data, yearlyData, yearOptions, drill, showDrill, exportXLSX,
       TRACKING_MONTHS, historicalBaseline, setPreset, isPreset };
   },
@@ -32993,7 +33036,9 @@ app.component('view-plStatement', {
   <div class="space-y-4">
     <div class="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-xl p-5 shadow">
       <h1 class="text-2xl font-bold">📈 Profit &amp; Loss Statement / งบกำไรขาดทุน</h1>
-      <p class="text-sm opacity-80 mt-1">รายได้จาก Sales Bills · COGS จาก WAC · ค่าใช้จ่ายจาก Expense · ค่าเสื่อม · ดอกเบี้ย · FX</p>
+      <p class="text-sm opacity-80 mt-1">
+        🔒 <b>WAC view</b> = ปิดงบจริง (Accounting Standard) · 💎 <b>Deal Cost view</b> = ผู้บริหารดูเทียบ (Dashboard เท่านั้น)
+      </p>
     </div>
 
     <!-- 🆕 Historical Baseline (ก่อน Go-Live) — แสดงเสมอ ไม่ขึ้นกับ date range -->
@@ -33055,6 +33100,79 @@ app.component('view-plStatement', {
       <select v-model="branchId" class="px-2 py-1.5 border rounded text-sm"><option value="">ทุกสาขา</option><option v-for="b in db.branches" :key="b.id" :value="b.id">{{b.name}}</option></select>
       <select v-model="txnModeFilter" class="px-2 py-1.5 border rounded text-sm"><option value="">All (Stock+Trading)</option><option value="STOCK">📦 Stock Only</option><option value="TRADING">🔄 Trading Only</option></select>
       <button @click="exportXLSX" class="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded">📥 Excel</button>
+    </div>
+
+    <!-- 🆕 PATCH 26: Cost Basis Toggle (WAC official vs Deal Cost management compare) -->
+    <div class="bg-white rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
+      <div class="text-sm font-semibold text-slate-700">มุมมองต้นทุน:</div>
+      <div class="flex border rounded-lg overflow-hidden">
+        <button @click="costBasisView='WAC'" :class="['px-4 py-2 text-sm font-medium', costBasisView==='WAC'?'bg-emerald-600 text-white':'bg-white text-slate-600 hover:bg-slate-50']" title="ใช้สำหรับปิดงบจริง (Accounting Standard)">
+          🔒 WAC (ปิดงบจริง)
+        </button>
+        <button @click="costBasisView='DEAL'" :class="['px-4 py-2 text-sm font-medium border-l', costBasisView==='DEAL'?'bg-purple-600 text-white':'bg-white text-slate-600 hover:bg-slate-50']" title="ใช้ Deal Cost จาก Cost Allocator (เฉพาะดูเทียบ ไม่ใช่ปิดงบ)">
+          💎 Deal Cost (Compare)
+        </button>
+        <button @click="costBasisView='COMPARE'" :class="['px-4 py-2 text-sm font-medium border-l', costBasisView==='COMPARE'?'bg-blue-600 text-white':'bg-white text-slate-600 hover:bg-slate-50']" title="แสดงทั้ง 2 view side-by-side พร้อม diff">
+          🔀 Side-by-side
+        </button>
+      </div>
+      <span class="text-xs ml-2" :class="costBasisView==='WAC'?'text-emerald-700':costBasisView==='DEAL'?'text-purple-700':'text-blue-700'">
+        <template v-if="costBasisView==='WAC'">📌 ตัวเลขทั้งหมดด้านล่างใช้ WAC × qty (มาตรฐานบัญชี · สำหรับปิดงบ)</template>
+        <template v-else-if="costBasisView==='DEAL'">📌 แทนต้นทุน WAC ของหมวด<b>ทอง/เหลือง</b>ด้วย <b>Deal Cost</b> จาก Cost Allocator (สำหรับผู้บริหารดู — ไม่ใช่งบจริง)</template>
+        <template v-else>📌 แสดงทั้ง 2 มุมมองพร้อมกัน + เห็นส่วนต่าง</template>
+      </span>
+      <span v-if="data.dualReplacedCount>0" class="ml-auto text-xs px-2 py-1 rounded bg-purple-100 text-purple-700 font-medium">
+        💎 มี {{data.dualReplacedCount}} บิลที่ Deal Cost ต่างจาก WAC
+      </span>
+    </div>
+
+    <!-- 🆕 PATCH 26: Side-by-side compare cards (only in COMPARE mode) -->
+    <div v-if="costBasisView==='COMPARE' && viewMode!=='yearly'" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <!-- WAC column -->
+      <div class="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-bold text-emerald-800">🔒 WAC View (ปิดงบจริง)</h3>
+          <span class="text-xs px-2 py-0.5 rounded bg-emerald-200 text-emerald-800">Accounting Standard</span>
+        </div>
+        <table class="w-full text-sm">
+          <tr><td class="py-1 text-slate-600">Revenue</td><td class="py-1 text-right font-medium text-emerald-700">{{fmt(data.rev.net)}}</td></tr>
+          <tr><td class="py-1 text-slate-600">COGS (WAC)</td><td class="py-1 text-right text-red-700">({{fmt(data.cogs_wac.total)}})</td></tr>
+          <tr class="border-t border-emerald-200"><td class="py-1 font-bold">Gross Profit</td><td class="py-1 text-right font-bold" :class="data.gp_wac>=0?'text-emerald-700':'text-red-700'">{{fmt(data.gp_wac)}}</td></tr>
+          <tr><td class="py-1 text-slate-600">GP %</td><td class="py-1 text-right text-xs">{{data.rev.net>0?(data.gp_wac/data.rev.net*100).toFixed(2):'0.00'}}%</td></tr>
+          <tr class="border-t border-emerald-200"><td class="py-1 font-bold">Net Profit</td><td class="py-1 text-right font-bold text-lg" :class="data.np_wac>=0?'text-emerald-700':'text-red-700'">{{fmt(data.np_wac)}}</td></tr>
+        </table>
+      </div>
+      <!-- DEAL column -->
+      <div class="bg-purple-50 border-2 border-purple-300 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-bold text-purple-800">💎 Deal Cost View (Management)</h3>
+          <span class="text-xs px-2 py-0.5 rounded bg-purple-200 text-purple-800">Dashboard Only</span>
+        </div>
+        <table class="w-full text-sm">
+          <tr><td class="py-1 text-slate-600">Revenue</td><td class="py-1 text-right font-medium text-emerald-700">{{fmt(data.rev.net)}}</td></tr>
+          <tr><td class="py-1 text-slate-600">COGS (Deal)</td><td class="py-1 text-right text-red-700">({{fmt(data.cogs_deal.total)}})</td></tr>
+          <tr class="border-t border-purple-200"><td class="py-1 font-bold">Gross Profit</td><td class="py-1 text-right font-bold" :class="data.gp_deal>=0?'text-emerald-700':'text-red-700'">{{fmt(data.gp_deal)}}</td></tr>
+          <tr><td class="py-1 text-slate-600">GP %</td><td class="py-1 text-right text-xs">{{data.rev.net>0?(data.gp_deal/data.rev.net*100).toFixed(2):'0.00'}}%</td></tr>
+          <tr class="border-t border-purple-200"><td class="py-1 font-bold">Net Profit</td><td class="py-1 text-right font-bold text-lg" :class="data.np_deal>=0?'text-emerald-700':'text-red-700'">{{fmt(data.np_deal)}}</td></tr>
+        </table>
+      </div>
+      <!-- DIFF column -->
+      <div class="bg-blue-50 border-2 border-blue-300 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-bold text-blue-800">🔀 Difference (Deal − WAC)</h3>
+          <span class="text-xs px-2 py-0.5 rounded bg-blue-200 text-blue-800">มุมมองผู้บริหาร</span>
+        </div>
+        <table class="w-full text-sm">
+          <tr><td class="py-1 text-slate-600">Revenue diff</td><td class="py-1 text-right text-slate-400">— เท่ากัน</td></tr>
+          <tr><td class="py-1 text-slate-600">COGS diff</td><td class="py-1 text-right font-medium" :class="data.cogs_diff>=0?'text-red-700':'text-emerald-700'">{{data.cogs_diff>=0?'+':''}}{{fmt(data.cogs_diff)}}</td></tr>
+          <tr class="border-t border-blue-200"><td class="py-1 font-bold">GP diff</td><td class="py-1 text-right font-bold" :class="data.gp_diff>=0?'text-emerald-700':'text-red-700'">{{data.gp_diff>=0?'+':''}}{{fmt(data.gp_diff)}}</td></tr>
+          <tr><td class="py-1 text-xs text-slate-500" colspan="2">
+            <template v-if="data.gp_diff>=0">💡 Deal Cost view ทำให้กำไรสูงกว่า WAC = ลอตที่ขายมีต้นทุนถูกกว่าค่าเฉลี่ย</template>
+            <template v-else>💡 Deal Cost view ทำให้กำไรต่ำกว่า WAC = ลอตที่ขายมีต้นทุนแพงกว่าค่าเฉลี่ย</template>
+          </td></tr>
+          <tr class="border-t border-blue-200"><td class="py-1 font-bold">Net Profit diff</td><td class="py-1 text-right font-bold text-lg" :class="(data.np_deal-data.np_wac)>=0?'text-emerald-700':'text-red-700'">{{(data.np_deal-data.np_wac)>=0?'+':''}}{{fmt(data.np_deal-data.np_wac)}}</td></tr>
+        </table>
+      </div>
     </div>
 
     <!-- 🎯 P&L Mega Dashboard -->
