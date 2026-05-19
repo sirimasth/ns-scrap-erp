@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./track-asset-overview.js"></script>
 <script>
   /* ============================================================
      SUPABASE CONFIG — Sprint 3
@@ -78,6 +79,41 @@
     -moz-appearance: textfield;   /* Firefox */
   }
   @media print { .no-print { display: none !important; } }
+  /* Track Asset — Overview Dashboard */
+  .ta-overview { padding: 18px; color: #e6ecff; background: #0b1220; min-height: 100%; border-radius: 12px; }
+  .ta-overview .ta-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .ta-overview .ta-toolbar h2 { margin: 0; font-size: 18px; color: #e6ecff; }
+  .ta-overview .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ta-overview select { background: #0e1729; border: 1px solid #1f2c4a; color: #e6ecff; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .ta-overview button { background: #1f2c4a; color: #fff; border: 0; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .ta-overview button.primary { background: linear-gradient(90deg, #4dabff, #a78bfa); }
+  .ta-overview .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .ta-overview .ta-kpi { background: #111a2e; border: 1px solid #1f2c4a; border-radius: 14px; padding: 14px; }
+  .ta-overview .ta-kpi .label { color: #8a96b8; font-size: 12px; }
+  .ta-overview .ta-kpi .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .ta-overview .ta-kpi .delta { font-size: 12px; margin-top: 6px; }
+  .ta-overview .ta-kpi .delta.up { color: #2ecc71; }
+  .ta-overview .ta-kpi .delta.down { color: #ff6b6b; }
+  .ta-overview .grid-2 { display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 14px; }
+  @media (max-width: 900px) { .ta-overview .grid-2 { grid-template-columns: 1fr; } }
+  .ta-overview .ta-card { background: #111a2e; border: 1px solid #1f2c4a; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .ta-overview .ta-card h3 { margin: 0 0 12px; font-size: 14px; color: #c6d0ee; }
+  .ta-overview .chart-wrap { height: 240px; position: relative; }
+  .ta-overview .ta-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ta-overview .ta-table th { text-align: left; color: #8a96b8; padding: 8px 6px; border-bottom: 1px solid #1f2c4a; }
+  .ta-overview .ta-table td { padding: 9px 6px; border-bottom: 1px solid #15203b; }
+  .ta-overview .ta-table .r { text-align: right; }
+  .ta-overview .row-clickable { cursor: pointer; }
+  .ta-overview .row-clickable:hover { background: #15203b; }
+  .ta-overview .pos { color: #2ecc71; }
+  .ta-overview .neg { color: #ff6b6b; }
+  .ta-overview .badge { background: #1c2848; color: #a9b6d9; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .ta-overview .alert { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-radius: 10px; background: #1a2440; border-left: 3px solid #ffcc4d; margin-bottom: 8px; }
+  .ta-overview .alert.sev-critical { border-left-color: #ff6b6b; }
+  .ta-overview .alert.sev-info { border-left-color: #4dabff; }
+  .ta-overview .empty { color: #8a96b8; text-align: center; padding: 20px; }
+  .ta-overview .ta-banner.err { background: #3b1f1f; border: 1px solid #ff6b6b; color: #ffb4b4; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+  .ta-overview .ta-loading { color: #8a96b8; padding: 24px; text-align: center; }
 </style>
 </head>
 <body class="bg-slate-100">
@@ -2781,7 +2817,7 @@ function seedData() {
       { id:'R-POOPAE', name:'Poopae', desc:'Role พิเศษ — เข้าถึงพิเศษ + Production + Asset + Loan + ใบสำคัญรับเงิน + Bank Recon + Import Master + โอนเงินระหว่างบัญชี', isSystem:false,
         // 🆕 ADD: receiptVoucher, bankRecon, mdExpense, historicalData, mdImport, transfer
         // 🚫 REMOVE: dashboard, cashPosition
-        menus:['changePassword','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','wipReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile'],
+        menus:['changePassword','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','wipReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','trackAssetOverview','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:true, seeCash:true, seeFinancials:true, seeOpening:true,
         branchScope:'all' },
@@ -8858,9 +8894,9 @@ const app = createApp({
         {view:'poSell', label:'PO Sell (จองขาย)', icon:'📃'},
         {view:'costPool', label:'Cost Pool', icon:'🪣'},
         {view:'costAllocator', label:'Cost Allocator (ทอง/เหลือง)', icon:'🎯'},
-        {view:'waitingAllocations', label:'Waiting Allocations', icon:'⏳'},   // 🆕 PHASE 2.D
-        {view:'costAllocationLedger', label:'Allocation Ledger', icon:'📒'},   // 🆕 PHASE 3.A
-        {view:'dualCostingReport', label:'Dual Costing Report', icon:'📊'},   // 🆕 PHASE 3.B
+        {view:'waitingAllocations', label:'Waiting Allocations', icon:'⏳'},
+        {view:'costAllocationLedger', label:'Allocation Ledger', icon:'📒'},
+        {view:'dualCostingReport', label:'Dual Costing Report', icon:'📊'},
         {view:'matchLog', label:'Match Log', icon:'🔗'},
         {view:'dealMargin', label:'Deal Margin Report', icon:'💎'},
         {view:'compareMargin', label:'Compare Deal vs Stock', icon:'⚖️'},
@@ -8916,6 +8952,7 @@ const app = createApp({
         {view:'assetDisposal', label:'จำหน่ายทรัพย์สิน', icon:'🗑️'},
         {view:'loanContracts', label:'Loan / Leasing / BSL', icon:'🏦'},
         {view:'loanDashboard', label:'Loan Dashboard', icon:'📊'},
+        {view:'trackAssetOverview', label:'Net Worth / Track Asset', icon:'💎'},
         {view:'equityMaint',  label:'Equity / ทุนจดทะเบียน', icon:'👑'},
         {view:'openingBalance', label:'⭐ Opening Balance / ตั้งต้นยอด', icon:'🚀'},
         {view:'historicalData', label:'📅 ข้อมูลย้อนหลัง ม.ค.-เม.ย. 2026 (ก่อน Go-Live)', icon:'📅'},
@@ -16300,8 +16337,14 @@ app.component('view-receipt', {
           });
           db.receipts = safeArr(db.receipts).filter(r => r && (r.voucherId || r.id) !== voucherId);
           db.bankStatement = safeArr(db.bankStatement).filter(s => !(s && s.refType === 'RCP' && s.refId === voucherId));
+          // 🆕 PATCH 29B: Reverse prior FX gain/loss rows linked to this voucher (will be re-created if still FX)
+          if (db.fxGainLoss && Array.isArray(db.fxGainLoss)) {
+            db.fxGainLoss = db.fxGainLoss.filter(g => !(g && g.transactionType === 'Receipt' && g.transactionId === voucherId));
+          }
         }
         const customerNames = new Set();
+        // 🆕 PATCH 29B (2026-05-19): Track FX rows to push after the loop
+        const _fxRowsToInsert = [];
         validLines.forEach((line, idx) => {
           const bill = safeArr(db.salesBills).find(b => b && b.id === line.billId);
           if (bill) {
@@ -16312,6 +16355,45 @@ app.component('view-receipt', {
             bill.updatedAt = new Date().toISOString();
             bill.updatedBy = ((erp.currentUser && erp.currentUser.value && erp.currentUser.value.username) || '-');
             if (bill.customerId) customerNames.add(erp.customerName(bill.customerId));
+
+            // 🆕 PATCH 29B: FX Gain/Loss for FX bills (currency !== 'THB' and fxRate > 0)
+            try {
+              const billCurrency = String(bill.currency || 'THB').toUpperCase();
+              const billFxRate = Number(bill.fxRate || 0);
+              if (billCurrency !== 'THB' && billFxRate > 0) {
+                // Receipt is recorded in THB (line.receiptAmount). Compute foreign equivalent
+                // using receipt-day FX, then compare against bill-day FX to get FX gain/loss.
+                const receiptDateFx = erp.getFxRate ? erp.getFxRate(billCurrency, 'THB', f.date) : null;
+                const settlementRate = (receiptDateFx && receiptDateFx > 0) ? Number(receiptDateFx) : billFxRate;
+                // Foreign amount allocated to this bill = THB allocated / settlement rate
+                const foreignAllocated = allocated / settlementRate;
+                // What that foreign would have been worth at bill rate (THB):
+                const thbAtBillRate = foreignAllocated * billFxRate;
+                // FX gain/loss = THB received now − THB originally accrued (at bill rate)
+                // > 0 means baht weakened → we received MORE baht → FX Gain
+                // < 0 means baht strengthened → we received LESS baht → FX Loss
+                const fxGL = allocated - thbAtBillRate;
+                if (Math.abs(fxGL) > 0.01) {
+                  _fxRowsToInsert.push({
+                    id: 'FXG-RCP-' + voucherId + '-' + idx,
+                    date: f.date,
+                    transactionType: 'Receipt',
+                    transactionId: voucherId,
+                    referenceDocId: bill.id,
+                    referenceDocNo: bill.docNo,
+                    currency: billCurrency,
+                    originalFxRate: billFxRate,
+                    settlementFxRate: settlementRate,
+                    foreignAmount: foreignAllocated,
+                    originalThbValue: thbAtBillRate,
+                    settlementThbValue: allocated,
+                    fxGainLossAmount: fxGL,
+                    gainLossType: fxGL >= 0 ? 'Gain' : 'Loss',
+                    createdBy: erp.currentUser.value?.username || '-'
+                  });
+                }
+              }
+            } catch(fxErr) { console.warn('[FX gain/loss calc]', fxErr); }
           }
           const billCustomerId = bill?.customerId || line.customerId || '';
           db.receipts.push({
@@ -16327,6 +16409,12 @@ app.component('view-receipt', {
             updatedAt: new Date().toISOString()
           });
         });
+        // 🆕 PATCH 29B: Insert FX gain/loss rows (after clearing previous for this voucher)
+        if (db.fxGainLoss && Array.isArray(db.fxGainLoss)) {
+          // Remove any prior FX rows linked to this voucher (in case of edit)
+          db.fxGainLoss = db.fxGainLoss.filter(g => !(g && g.transactionType === 'Receipt' && g.transactionId === voucherId));
+          _fxRowsToInsert.forEach(r => db.fxGainLoss.push(r));
+        }
         const customerLabel = Array.from(customerNames).join(', ').slice(0,80) || 'หลายราย';
         // 🆕 PATCH 14c (2026-05-15): Query first, delete by explicit id
         const oldBsIds = safeArr(db.bankStatement)
@@ -16426,6 +16514,10 @@ app.component('view-receipt', {
       const bsIds = db.bankStatement.filter(s => s.refType==='RCP' && s.refId===g.id).map(s => s.id);
       db.receipts = db.receipts.filter(r => (r.voucherId||r.id) !== g.id);
       db.bankStatement = db.bankStatement.filter(s => !(s.refType==='RCP' && s.refId===g.id));
+      // 🆕 PATCH 29B: Also clear FX gain/loss rows for this receipt voucher
+      if (db.fxGainLoss && Array.isArray(db.fxGainLoss)) {
+        db.fxGainLoss = db.fxGainLoss.filter(x => !(x && x.transactionType === 'Receipt' && x.transactionId === g.id));
+      }
       // 🆕 ลบ Cloud
       if (receiptIds.length) await erp.deleteCloud('receipts', receiptIds);
       if (bsIds.length) await erp.deleteCloud('bankStatement', bsIds);
@@ -18213,6 +18305,11 @@ app.component('view-sales', {
         receivedAmount:0, receivableBalance:0, status:'unreceived',
         salesSource:'DIRECT', // DIRECT | PO_DELIVERY
         poSellId:'',
+        // 🆕 PATCH 29 (2026-05-19): FX / Export — บิลขายสกุลต่างประเทศ
+        currency:'THB',           // THB | USD | EUR | CNY | JPY ...
+        fxRate:1,                 // อัตราแลกเปลี่ยน ณ วันออกบิล (1 ถ้า THB)
+        invoiceAmountForeign:0,   // ยอดบิลในสกุลต่างประเทศ (0 ถ้า THB)
+        isExport:false,           // ☑ ส่งออก/บิลต่างประเทศ
         createdBy:erp.currentUser.value?.username||'-', createdAt:new Date().toISOString() };
     }
     /* Available Trading Purchases (with remaining unmatched cost) for dropdown */
@@ -18467,6 +18564,11 @@ app.component('view-sales', {
       Object.keys(form).forEach(k => delete form[k]);
       if (item) {
         Object.assign(form, JSON.parse(JSON.stringify(item))); editing.value = item;
+        // 🆕 PATCH 29G (2026-05-19): Backward compat — ensure FX fields exist for old bills
+        if (form.currency == null) form.currency = 'THB';
+        if (!Number(form.fxRate) || Number(form.fxRate) <= 0) form.fxRate = 1;
+        if (form.invoiceAmountForeign == null) form.invoiceAmountForeign = 0;
+        if (form.isExport == null) form.isExport = false;
         // 🆕 Backward compat: ถ้าบิลเก่าไม่มี tradingFromPurchaseIds → derive จาก items.sourcePurchaseBillId หรือ legacy field
         if (!Array.isArray(form.tradingFromPurchaseIds) || !form.tradingFromPurchaseIds.length) {
           const fromItems = [...new Set((form.items||[]).map(it => it.sourcePurchaseBillId).filter(Boolean))];
@@ -18726,6 +18828,36 @@ app.component('view-sales', {
       recalcAll();
     }
 
+    /* 🆕 PATCH 29 (2026-05-19): FX / Export helpers */
+    const invoiceAmountForeignDisplay = computed(() => {
+      const tot = Number(form.totalAmount || 0);
+      const fx = Number(form.fxRate || 1);
+      if (!form.isExport || form.currency === 'THB' || fx <= 0) return 0;
+      return tot / fx;
+    });
+    function onExportToggle() {
+      if (form.isExport) {
+        if (!form.currency || form.currency === 'THB') form.currency = 'USD';
+        // 🆕 PATCH 29F (2026-05-19): No auto-fetch — user enters FX rate from ใบขน
+        if (!Number(form.fxRate) || Number(form.fxRate) <= 0) form.fxRate = 0;  // blank to force entry
+      } else {
+        form.currency = 'THB';
+        form.fxRate = 1;
+        form.invoiceAmountForeign = 0;
+      }
+    }
+    function onCurrencyChange() {
+      if (form.currency === 'THB') { form.fxRate = 1; form.invoiceAmountForeign = 0; return; }
+      // 🆕 PATCH 29F: User must enter FX rate manually from ใบขน (no auto-fetch)
+      form.fxRate = 0;
+      form.invoiceAmountForeign = 0;
+    }
+    function onFxRateInput() {
+      if (form.currency && form.currency !== 'THB' && Number(form.fxRate) > 0) {
+        form.invoiceAmountForeign = Number(form.totalAmount||0) / Number(form.fxRate);
+      }
+    }
+
     function recalcAll() {
       if (!Array.isArray(form.items)) return;
       form.items.forEach(recalcLine);
@@ -18839,6 +18971,16 @@ app.component('view-sales', {
       }
       const id = editing.value ? editing.value.id : erp.uid('SB');
       const bill = JSON.parse(JSON.stringify({...form, id}));
+      // 🆕 PATCH 29A: Normalize FX fields — guard against blank values
+      if (!bill.currency) bill.currency = 'THB';
+      if (!Number(bill.fxRate) || Number(bill.fxRate) <= 0) bill.fxRate = 1;
+      if (bill.currency !== 'THB' && Number(bill.fxRate) > 0) {
+        if (!Number(bill.invoiceAmountForeign)) {
+          bill.invoiceAmountForeign = Number(bill.totalAmount||0) / Number(bill.fxRate);
+        }
+      } else {
+        bill.invoiceAmountForeign = 0;
+      }
       bill.receivableBalance = bill.totalAmount - bill.receivedAmount;
       bill.status = bill.receivedAmount<=0 ? 'unreceived' : (bill.receivedAmount>=bill.totalAmount ? 'received' : 'partial');
 
@@ -19512,7 +19654,9 @@ app.component('view-sales', {
       // 🆕 Export
       exportSalesBills,
       // 🆕 Customer salesId helpers
-      getCustomerSalesId, updateCustomerSalesId, quickAddSalesForCustomer };
+      getCustomerSalesId, updateCustomerSalesId, quickAddSalesForCustomer,
+      // 🆕 PATCH 29 (2026-05-19): FX / Export helpers
+      invoiceAmountForeignDisplay, onExportToggle, onCurrencyChange, onFxRateInput };
   },
   template: `
   <div>
@@ -19750,6 +19894,49 @@ app.component('view-sales', {
             <div><label class="block text-xs text-slate-600 mb-1">👤 ผู้รับของ</label><input v-model="form.contactName" placeholder="ชื่อคนรับของ" class="w-full px-2 py-1.5 border rounded"></div>
             <div class="md:col-span-3"><label class="block text-xs text-slate-600 mb-1">หมายเหตุ</label><input v-model="form.note" class="w-full px-2 py-1.5 border rounded"></div>
           </div>
+
+          <!-- 🆕 PATCH 29 (2026-05-19): Export / FX section — collapse outer when not export -->
+          <details class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3" :open="!!form.isExport">
+            <summary class="cursor-pointer select-none">
+              <label class="inline-flex items-center gap-2 cursor-pointer" @click.stop>
+                <input type="checkbox" v-model="form.isExport" @change="onExportToggle()" @click.stop class="w-5 h-5">
+                <span class="font-bold text-blue-900">🌍 บิลส่งออก / สกุลต่างประเทศ (Export)</span>
+              </label>
+              <span class="text-xs text-slate-500 font-normal ml-2">— เปิดเมื่อขายลูกค้าต่างประเทศ · กรอก FX rate ตามใบขนสินค้า</span>
+            </summary>
+            <div v-if="form.isExport" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3">
+              <div>
+                <label class="block text-xs text-slate-600 mb-1">สกุลเงิน</label>
+                <select v-model="form.currency" @change="onCurrencyChange()" class="w-full px-2 py-1.5 border rounded font-bold">
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="CNY">CNY</option>
+                  <option value="JPY">JPY</option>
+                  <option value="THB">THB</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs text-slate-600 mb-1">FX Rate <span class="text-slate-400">(THB / 1 {{form.currency}})</span></label>
+                <input type="number" step="0.0001" v-model.number="form.fxRate" @input="onFxRateInput()" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 33.50">
+                <div class="text-[10px] text-blue-700 mt-1">📋 กรอก FX rate ตามใบขนสินค้า (ตอนได้ใบขน)</div>
+              </div>
+              <div>
+                <label class="block text-xs text-slate-600 mb-1">ยอดบิล ({{form.currency}})</label>
+                <input :value="fmt(invoiceAmountForeignDisplay)" class="w-full px-2 py-1.5 border rounded bg-slate-50 text-right" readonly>
+                <div class="text-[10px] text-slate-500 mt-0.5">= ยอดบิล THB ÷ FX</div>
+              </div>
+              <div>
+                <label class="block text-xs text-slate-600 mb-1">ยอดบิล (THB equivalent)</label>
+                <input :value="fmt(form.totalAmount)" class="w-full px-2 py-1.5 border rounded bg-emerald-50 text-right font-bold" readonly>
+                <div class="text-[10px] text-emerald-700 mt-0.5">= ยอดที่ใช้คำนวณ AR / P&L</div>
+              </div>
+              <div class="md:col-span-4 text-xs text-blue-700 bg-blue-100 rounded p-2 space-y-1">
+                <div>💡 <b>หลักการ:</b> ยอด THB บันทึกตามใบขนสินค้าขาออก · กรอก FX rate ตามที่ระบุในใบขน</div>
+                <div>🔄 เมื่อรับเงินจริง ระบบจะคำนวณ <b>FX Gain/Loss</b> = (FX rate วันรับเงิน − FX rate ใบขน) × foreign amount</div>
+                <div>📊 แสดงใน <b>P&L → Other Income/Expense</b> แยกบรรทัด Gain/Loss</div>
+              </div>
+            </div>
+          </details>
           <div>
             <div class="flex items-center justify-between mb-2"><h4 class="font-medium">📋 รายการสินค้า ({{(form.items||[]).length}})</h4><button @click="addItem" class="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs">+ เพิ่มรายการ</button></div>
             <div class="overflow-x-auto border rounded-lg">
@@ -24827,10 +25014,14 @@ app.component('view-overseasReceipt', {
             in:0, out:r.bankFeeThb, refType:'ORC-FEE', refId:id, refNo:r.docNo, createdBy:r.createdBy });
         }
         if (Math.abs(fxGainLoss) > 0.01) {
+          // 🆕 PATCH 29: Add referenceDocNo for P&L drill-down readability
+          const refBill = r.billId ? db.salesBills.find(b => b && b.id === r.billId) : null;
           db.fxGainLoss.push({ id:erp.uid('FXG'), date:r.date, transactionType:'Receipt', transactionId:id,
-            referenceDocId: r.billId, currency:r.receivedCurrency, originalFxRate:originalRate, settlementFxRate:r.fxRate,
+            referenceDocId: r.billId, referenceDocNo: refBill?.docNo || r.docNo,
+            currency:r.receivedCurrency, originalFxRate:originalRate, settlementFxRate:r.fxRate,
             foreignAmount:r.receivedAmountForeign, originalThbValue: r.receivedAmountForeign*originalRate, settlementThbValue:r.receivedAmountThb,
-            fxGainLossAmount:fxGainLoss, gainLossType: fxGainLoss>=0 ? 'Gain' : 'Loss' });
+            fxGainLossAmount:fxGainLoss, gainLossType: fxGainLoss>=0 ? 'Gain' : 'Loss',
+            createdBy: r.createdBy });
         }
       }
       erp.logAudit('create','overseasReceipt', null, r);
@@ -26293,7 +26484,7 @@ app.component('view-pendingSales', {
         items.forEach(it => {
           const k = it.productId;
           if (!k) return;
-          if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0 });
+          if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0, poSellOpenQty:0 });
           const r = map.get(k);
           r.poBuyQty += Number(it.qty||0);
           r.poBuyValue += Number(it.qty||0) * Number(it.unitPrice||0);
@@ -26305,7 +26496,7 @@ app.component('view-pendingSales', {
         (b.items||[]).forEach(it => {
           const k = it.productId;
           if (!k) return;
-          if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0 });
+          if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0, poSellOpenQty:0 });
           const r = map.get(k);
           r.spotBuyQty += Number(it.netWeight||0);
           r.spotBuyValue += Number(it.netAmount||0);
@@ -26316,12 +26507,22 @@ app.component('view-pendingSales', {
       _trkSafe(db.matchLogs).filter(m => m && m.status !== 'reversed').forEach(m => {
         const k = m.product_id || m.productId;
         if (!k) return;
-        if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0 });
+        if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0, poSellOpenQty:0 });
         const r = map.get(k);
         const qty = Number(m.qty_used||m.qty||0);
         const src = String(m.source_type||'').toLowerCase();
         if (src === 'po_buy' || src === 'pobuy') r.poMatched += qty;
         else r.spotMatched += qty;
+      });
+
+      // 3b. 🆕 PATCH 28 — PO Sell (ล๊อกขายรอส่ง = qty − matched, เฉพาะ Open / Partially Matched)
+      _trkSafe(db.poSells).filter(p => p && p.status !== 'Cancelled' && p.status !== 'cancelled' && p.status !== 'Fully Matched' && p.status !== 'Closed').forEach(p => {
+        const k = p.productId;
+        if (!k) return;
+        if (!map.has(k)) map.set(k, { productId: k, poBuyQty:0, poBuyValue:0, spotBuyQty:0, spotBuyValue:0, poMatched:0, spotMatched:0, poSellOpenQty:0 });
+        const r = map.get(k);
+        const matched = erp.poSellMatchedQty ? erp.poSellMatchedQty(p.id) : 0;
+        r.poSellOpenQty += Math.max(0, Number(p.qty||0) - matched);
       });
 
       // 4. Build final array
@@ -26356,6 +26557,8 @@ app.component('view-pendingSales', {
           poOnOrderQty, poAvgPrice, poOnOrderValue,
           // Spot in Pool (พร้อมจับคู่)
           spotInPoolQty, spotAvgPrice, spotInPoolValue,
+          // PO Sell open (ล๊อกขายรอส่ง — 🆕 PATCH 28)
+          poSellOpenQty: r.poSellOpenQty || 0,
           // Stock จริง
           stockQty, stockWAC, stockValue,
         };
@@ -26375,6 +26578,90 @@ app.component('view-pendingSales', {
     const reconRM = computed(() => costPoolReconciliation.value.filter(r => r.itemStatus === 'RM').sort((a,b)=>b.spotInPoolValue - a.spotInPoolValue));
     const reconFG = computed(() => costPoolReconciliation.value.filter(r => r.itemStatus === 'FG').sort((a,b)=>b.spotInPoolValue - a.spotInPoolValue));
     const reconWIP = computed(() => costPoolReconciliation.value.filter(r => r.itemStatus !== 'RM' && r.itemStatus !== 'FG').sort((a,b)=>b.spotInPoolValue - a.spotInPoolValue));
+
+    /* 🆕 PATCH 28 — ตารางรอขาย (เฉพาะ ทองแดง / ทองเหลือง)
+       รอขาย = ของใน Cost Pool ที่ยังไม่ allocate (spotInPoolQty)
+       รอขายจริง = STOCK + PO ซื้อรอส่ง − ล๊อกขายรอส่ง   (ติดลบ = ของขาด ต้องหาเพิ่ม)
+    */
+    const pendingSaleTable = computed(() => {
+      const groups = (erp.DUAL_COSTING_GROUPS || ['ทองแดง','ทองเหลือง']);
+      // Build from costPoolReconciliation but allow products that ONLY have poSellOpenQty or stock too
+      const reconMap = new Map(costPoolReconciliation.value.map(r => [r.productId, r]));
+
+      // Add active products in DUAL groups that may not be in reconMap yet
+      _safeArr(db.products).forEach(p => {
+        if (!p || p.active === false) return;
+        if (!groups.includes(p.metalGroup)) return;
+        if (!reconMap.has(p.id)) {
+          // Re-compute zero-row baseline for products without pool/PO activity
+          const stockQty = erp.stockOnHand ? erp.stockOnHand(p.id) : 0;
+          const stockWAC = erp.avgCost ? erp.avgCost(p.id) : 0;
+          reconMap.set(p.id, {
+            productId: p.id, productCode: p.code, productName: p.name,
+            itemStatus: p.itemStatus || 'RM', metalGroup: p.metalGroup,
+            poBuyQty:0, spotBuyQty:0, poMatched:0, spotMatched:0,
+            poOnOrderQty:0, poAvgPrice:0, poOnOrderValue:0,
+            spotInPoolQty:0, spotAvgPrice:0, spotInPoolValue:0,
+            poSellOpenQty:0,
+            stockQty, stockWAC, stockValue: stockQty * stockWAC,
+          });
+        }
+      });
+
+      const rows = Array.from(reconMap.values())
+        .filter(r => groups.includes(r.metalGroup))
+        .map(r => {
+          const pendingSaleQty   = r.spotInPoolQty;         // รอขาย (cost pool available)
+          const pendingSaleValue = r.spotInPoolValue;       // มูลค่ารอขาย
+          const avgPrice         = r.spotAvgPrice || (r.spotInPoolQty>0 ? r.spotInPoolValue/r.spotInPoolQty : 0);
+          const lockedSell       = r.poSellOpenQty;         // ล๊อกขายรอส่ง
+          const lockedBuy        = r.poOnOrderQty;          // PO ซื้อรอส่ง
+          const stock            = r.stockQty;              // STOCK
+          const realPendingSale  = stock + lockedBuy - lockedSell;  // รอขายจริง
+          return {
+            productId: r.productId,
+            productCode: r.productCode,
+            productName: r.productName,
+            metalGroup: r.metalGroup,
+            itemStatus: r.itemStatus,
+            pendingSaleQty, pendingSaleValue, avgPrice,
+            realPendingSale,
+            lockedSell, lockedBuy, stock,
+            stockWAC: r.stockWAC,
+          };
+        })
+        // ซ่อนแถวที่ทุกค่าเป็น 0
+        .filter(r => r.pendingSaleQty>0 || r.lockedSell>0 || r.lockedBuy>0 || r.stock>0)
+        // เรียงตามขาด (รอขายจริง ติดลบมากสุดขึ้นก่อน) แล้วตาม pendingSaleValue
+        .sort((a,b) => {
+          if (a.realPendingSale<0 && b.realPendingSale>=0) return -1;
+          if (b.realPendingSale<0 && a.realPendingSale>=0) return 1;
+          return b.pendingSaleValue - a.pendingSaleValue;
+        });
+      return rows;
+    });
+
+    const pendingSaleTotals = computed(() => {
+      const arr = pendingSaleTable.value;
+      return {
+        count: arr.length,
+        shortageCount: arr.filter(r => r.realPendingSale < 0).length,
+        totalPendingSaleQty: arr.reduce((s,r)=>s+r.pendingSaleQty,0),
+        totalPendingSaleValue: arr.reduce((s,r)=>s+r.pendingSaleValue,0),
+        totalLockedSell: arr.reduce((s,r)=>s+r.lockedSell,0),
+        totalLockedBuy: arr.reduce((s,r)=>s+r.lockedBuy,0),
+        totalStock: arr.reduce((s,r)=>s+r.stock,0),
+        totalRealPending: arr.reduce((s,r)=>s+r.realPendingSale,0),
+      };
+    });
+
+    function exportPendingSaleCsv() {
+      const rows = [['Product Code','Product Name','หมวด','Status','รอขาย (กก.)','มูลค่ารอขาย (฿)','ราคาเฉลี่ย (฿/กก.)','รอขายจริง (กก.)','ล๊อกขายรอส่ง (กก.)','PO ซื้อรอส่ง (กก.)','STOCK (กก.)']];
+      pendingSaleTable.value.forEach(r => {
+        rows.push([r.productCode, r.productName, r.metalGroup, r.itemStatus, r.pendingSaleQty, r.pendingSaleValue, r.avgPrice, r.realPendingSale, r.lockedSell, r.lockedBuy, r.stock]);
+      });
+      downloadCsv('pending_sale_table_'+erp.today()+'.csv', rows);
+    }
 
     /* Totals */
     const reconTotals = computed(() => {
@@ -26405,7 +26692,9 @@ app.component('view-pendingSales', {
       lmeBaseFor, lmeTargetForProduct, wacVsLme, lmeProductsCuBr,
       exportCsv, fmt:erp.fmt,
       // 🆕 Cost Pool vs Stock
-      costPoolReconciliation, reconRM, reconFG, reconWIP, reconTotals, exportReconCsv };
+      costPoolReconciliation, reconRM, reconFG, reconWIP, reconTotals, exportReconCsv,
+      // 🆕 PATCH 28 — ตารางรอขาย (ทองแดง/ทองเหลือง)
+      pendingSaleTable, pendingSaleTotals, exportPendingSaleCsv };
   },
   template: `
   <div class="space-y-3">
@@ -26588,150 +26877,113 @@ app.component('view-pendingSales', {
       </div>
     </div>
 
-    <!-- 🆕 ════════════════════════════════════════════════════════════
-         📦 Pool & Stock Inventory — รายตัว แยก RM / FG
+    <!-- 🆕 PATCH 28 ════════════════════════════════════════════════════
+         📋 ตารางรอขาย — เฉพาะ ทองแดง / ทองเหลือง (Dual Costing Categories)
          ════════════════════════════════════════════════════════════ -->
     <div class="bg-gradient-to-r from-indigo-600 to-purple-700 text-white rounded-xl p-4 shadow mt-4">
-      <h2 class="text-lg font-bold flex items-center gap-2">📦 Pool & Stock Inventory <span class="text-xs font-normal opacity-80">(รายสินค้า · แยก RM/FG)</span></h2>
+      <h2 class="text-lg font-bold flex items-center gap-2">📋 ตารางรอขาย <span class="text-xs font-normal opacity-80">(เฉพาะ ทองแดง / ทองเหลือง · ของใน Cost Pool ที่ยังไม่ allocate)</span></h2>
       <p class="text-xs opacity-80 mt-1">
-        <b>PO On-Order</b> = จองซื้อ (ของกำลังจะมา) ·
-        <b>Spot in Pool</b> = บิลรับซื้อจริง − matched (พร้อมจับคู่ขาย) ·
-        <b>Stock จริง</b> = ของในคลัง (จาก Stock Ledger)
+        <b>รอขาย</b> = ของใน Cost Pool ที่ยังไม่ถูก Allocate ·
+        <b>ล๊อกขายรอส่ง</b> = PO Sell (Open + Partially Matched) ที่ยังไม่ส่งของ ·
+        <b>PO ซื้อรอส่ง</b> = PO Buy ที่ยังไม่ matched (กำลังจะเข้าสต๊อก) ·
+        <b>STOCK</b> = ของในคลังตามจริง
       </p>
-      <p class="text-[10px] opacity-70 mt-1">⚠ Pool ≠ Stock โดยธรรมชาติ — เพราะ PO Buy อยู่ใน Pool แต่ของยังไม่เข้า Stock จริง</p>
+      <p class="text-[11px] opacity-90 mt-2 bg-white/15 rounded p-2">
+        ⚠ <b>รอขายจริง</b> = STOCK + PO ซื้อรอส่ง − ล๊อกขายรอส่ง · <b class="text-red-200">ถ้า "ติดลบ" สีแดง</b> = ของจริง+ของกำลังเข้าไม่พอกับที่ล๊อกขาย — ต้องหาเพิ่ม!
+      </p>
     </div>
 
-    <!-- Recon Totals Bar -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="bg-white rounded-xl shadow p-3 border-l-4 border-purple-500">
-        <div class="text-xs text-slate-500">📋 PO On-Order (จะเข้ามา)</div>
-        <div class="text-lg font-bold text-purple-700">{{fmt(reconTotals.totalPoOnOrderQty)}} กก.</div>
-        <div class="text-xs text-slate-400">≈ {{fmt(reconTotals.totalPoOnOrderValue)}} ฿</div>
-      </div>
+    <!-- Totals Bar -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
       <div class="bg-white rounded-xl shadow p-3 border-l-4 border-emerald-500">
-        <div class="text-xs text-slate-500">💰 Spot in Pool (พร้อมจับคู่)</div>
-        <div class="text-lg font-bold text-emerald-700">{{fmt(reconTotals.totalSpotInPoolQty)}} กก.</div>
-        <div class="text-xs text-slate-400">≈ {{fmt(reconTotals.totalSpotInPoolValue)}} ฿</div>
+        <div class="text-xs text-slate-500">💰 รอขาย (Cost Pool)</div>
+        <div class="text-lg font-bold text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleQty)}} กก.</div>
+        <div class="text-xs text-slate-400">≈ {{fmt(pendingSaleTotals.totalPendingSaleValue)}} ฿</div>
+      </div>
+      <div class="bg-white rounded-xl shadow p-3 border-l-4 border-pink-500">
+        <div class="text-xs text-slate-500">🔒 ล๊อกขายรอส่ง</div>
+        <div class="text-lg font-bold text-pink-700">{{fmt(pendingSaleTotals.totalLockedSell)}} กก.</div>
+        <div class="text-xs text-slate-400">PO Sell (Open)</div>
+      </div>
+      <div class="bg-white rounded-xl shadow p-3 border-l-4 border-purple-500">
+        <div class="text-xs text-slate-500">📦 PO ซื้อรอส่ง</div>
+        <div class="text-lg font-bold text-purple-700">{{fmt(pendingSaleTotals.totalLockedBuy)}} กก.</div>
+        <div class="text-xs text-slate-400">PO Buy (Open)</div>
       </div>
       <div class="bg-white rounded-xl shadow p-3 border-l-4 border-blue-500">
-        <div class="text-xs text-slate-500">📦 Stock จริง (จาก Ledger)</div>
-        <div class="text-lg font-bold text-blue-700">{{fmt(reconTotals.totalStockQty)}} กก.</div>
-        <div class="text-xs text-slate-400">≈ {{fmt(reconTotals.totalStockValue)}} ฿ (WAC)</div>
+        <div class="text-xs text-slate-500">🏷 STOCK</div>
+        <div class="text-lg font-bold text-blue-700">{{fmt(pendingSaleTotals.totalStock)}} กก.</div>
+        <div class="text-xs text-slate-400">ของจริงในคลัง</div>
       </div>
-      <div class="bg-white rounded-xl shadow p-3 border-l-4 border-slate-400">
-        <div class="text-xs text-slate-500">🔢 จำนวนสินค้า</div>
-        <div class="text-lg font-bold text-slate-700">{{reconTotals.productCount}} รายการ</div>
-        <button @click="exportReconCsv" class="text-xs text-indigo-600 hover:underline mt-1">📥 Export CSV</button>
+      <div class="bg-white rounded-xl shadow p-3" :class="pendingSaleTotals.totalRealPending<0 ? 'border-l-4 border-red-600' : 'border-l-4 border-slate-400'">
+        <div class="text-xs text-slate-500">⚖ รอขายจริง (รวม)</div>
+        <div class="text-lg font-bold" :class="pendingSaleTotals.totalRealPending<0 ? 'text-red-600' : 'text-slate-700'">{{fmt(pendingSaleTotals.totalRealPending)}} กก.</div>
+        <div class="text-xs" :class="pendingSaleTotals.shortageCount>0 ? 'text-red-500 font-bold' : 'text-slate-400'">
+          <template v-if="pendingSaleTotals.shortageCount>0">⚠ ขาด {{pendingSaleTotals.shortageCount}} รายการ</template>
+          <template v-else>✓ ครบทุกรายการ</template>
+        </div>
       </div>
     </div>
 
-    <!-- RM Section -->
-    <div v-if="reconRM.length" class="bg-white rounded-xl shadow overflow-hidden">
-      <div class="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
-        <h3 class="font-bold text-amber-900 text-sm">🟡 RM — วัตถุดิบ ({{reconRM.length}} รายการ)</h3>
+    <!-- Main Table -->
+    <div v-if="pendingSaleTable.length" class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+        <h3 class="font-bold text-amber-900 text-sm">🟡 ตารางรอขาย — ทองแดง / ทองเหลือง ({{pendingSaleTable.length}} รายการ)</h3>
+        <button @click="exportPendingSaleCsv" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">📥 Export CSV</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
-          <thead class="bg-slate-50">
-            <tr>
+          <thead class="bg-slate-100">
+            <tr class="text-slate-700">
               <th class="p-2 text-left">รหัส / สินค้า</th>
               <th class="p-2 text-left">หมวด</th>
-              <th class="p-2 text-right text-purple-700" colspan="2">PO On-Order</th>
-              <th class="p-2 text-right text-emerald-700" colspan="2">Spot in Pool</th>
-              <th class="p-2 text-right text-blue-700" colspan="2">Stock จริง</th>
-            </tr>
-            <tr class="text-[10px] text-slate-500 bg-slate-100">
-              <th></th><th></th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">฿/กก.</th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">฿/กก.</th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">WAC ฿/กก.</th>
+              <th class="p-2 text-right text-emerald-700">รอขาย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-emerald-700">มูลค่ารอขาย<br><span class="text-[10px] font-normal text-slate-400">(฿)</span></th>
+              <th class="p-2 text-right text-slate-600">ราคาเฉลี่ย<br><span class="text-[10px] font-normal text-slate-400">(฿/กก.)</span></th>
+              <th class="p-2 text-right text-red-700">รอขายจริง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-pink-700">ล๊อกขายรอส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-purple-700">PO ซื้อรอส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-blue-700">STOCK<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in reconRM" :key="r.productId" class="border-t hover:bg-slate-50">
-              <td class="p-2"><span class="font-mono text-slate-500">{{r.productCode}}</span> {{r.productName}}</td>
+            <tr v-for="r in pendingSaleTable" :key="r.productId" class="border-t hover:bg-slate-50"
+                :class="r.realPendingSale < 0 ? 'bg-red-50' : ''">
+              <td class="p-2">
+                <span class="font-mono text-slate-500">{{r.productCode}}</span> {{r.productName}}
+                <span class="text-[10px] text-slate-400 ml-1">[{{r.itemStatus}}]</span>
+              </td>
               <td class="p-2 text-slate-600">{{r.metalGroup}}</td>
-              <td class="p-2 text-right" :class="r.poOnOrderQty>0?'font-bold text-purple-700':'text-slate-300'">{{fmt(r.poOnOrderQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.poOnOrderQty>0?fmt(r.poAvgPrice):'-'}}</td>
-              <td class="p-2 text-right" :class="r.spotInPoolQty>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.spotInPoolQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.spotInPoolQty>0?fmt(r.spotAvgPrice):'-'}}</td>
-              <td class="p-2 text-right" :class="r.stockQty>0?'font-bold text-blue-700':'text-slate-300'">{{fmt(r.stockQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.stockQty>0?fmt(r.stockWAC):'-'}}</td>
+              <td class="p-2 text-right" :class="r.pendingSaleQty>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.pendingSaleQty)}}</td>
+              <td class="p-2 text-right" :class="r.pendingSaleValue>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.pendingSaleValue)}}</td>
+              <td class="p-2 text-right text-slate-600">{{r.avgPrice>0?fmt(r.avgPrice):'-'}}</td>
+              <td class="p-2 text-right font-bold" :class="r.realPendingSale<0 ? 'text-red-700 bg-red-100' : (r.realPendingSale>0 ? 'text-emerald-700' : 'text-slate-400')">
+                <template v-if="r.realPendingSale<0">⚠ {{fmt(r.realPendingSale)}}</template>
+                <template v-else>{{fmt(r.realPendingSale)}}</template>
+              </td>
+              <td class="p-2 text-right" :class="r.lockedSell>0?'font-bold text-pink-700':'text-slate-300'">{{fmt(r.lockedSell)}}</td>
+              <td class="p-2 text-right" :class="r.lockedBuy>0?'font-bold text-purple-700':'text-slate-300'">{{fmt(r.lockedBuy)}}</td>
+              <td class="p-2 text-right" :class="r.stock>0?'font-bold text-blue-700':'text-slate-300'">{{fmt(r.stock)}}</td>
             </tr>
           </tbody>
+          <tfoot class="bg-slate-50 border-t-2 border-slate-300">
+            <tr class="font-bold text-slate-700">
+              <td class="p-2" colspan="2">รวม ({{pendingSaleTable.length}} รายการ)</td>
+              <td class="p-2 text-right text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleQty)}}</td>
+              <td class="p-2 text-right text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleValue)}}</td>
+              <td class="p-2 text-right text-slate-400">-</td>
+              <td class="p-2 text-right" :class="pendingSaleTotals.totalRealPending<0?'text-red-700':'text-slate-700'">{{fmt(pendingSaleTotals.totalRealPending)}}</td>
+              <td class="p-2 text-right text-pink-700">{{fmt(pendingSaleTotals.totalLockedSell)}}</td>
+              <td class="p-2 text-right text-purple-700">{{fmt(pendingSaleTotals.totalLockedBuy)}}</td>
+              <td class="p-2 text-right text-blue-700">{{fmt(pendingSaleTotals.totalStock)}}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
 
-    <!-- FG Section -->
-    <div v-if="reconFG.length" class="bg-white rounded-xl shadow overflow-hidden">
-      <div class="px-4 py-2 bg-emerald-50 border-b border-emerald-200 flex items-center justify-between">
-        <h3 class="font-bold text-emerald-900 text-sm">🟢 FG — สินค้าสำเร็จรูป ({{reconFG.length}} รายการ)</h3>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="p-2 text-left">รหัส / สินค้า</th>
-              <th class="p-2 text-left">หมวด</th>
-              <th class="p-2 text-right text-purple-700" colspan="2">PO On-Order</th>
-              <th class="p-2 text-right text-emerald-700" colspan="2">Spot in Pool</th>
-              <th class="p-2 text-right text-blue-700" colspan="2">Stock จริง</th>
-            </tr>
-            <tr class="text-[10px] text-slate-500 bg-slate-100">
-              <th></th><th></th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">฿/กก.</th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">฿/กก.</th>
-              <th class="p-1 text-right">Qty (กก.)</th><th class="p-1 text-right">WAC ฿/กก.</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in reconFG" :key="r.productId" class="border-t hover:bg-slate-50">
-              <td class="p-2"><span class="font-mono text-slate-500">{{r.productCode}}</span> {{r.productName}}</td>
-              <td class="p-2 text-slate-600">{{r.metalGroup}}</td>
-              <td class="p-2 text-right" :class="r.poOnOrderQty>0?'font-bold text-purple-700':'text-slate-300'">{{fmt(r.poOnOrderQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.poOnOrderQty>0?fmt(r.poAvgPrice):'-'}}</td>
-              <td class="p-2 text-right" :class="r.spotInPoolQty>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.spotInPoolQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.spotInPoolQty>0?fmt(r.spotAvgPrice):'-'}}</td>
-              <td class="p-2 text-right" :class="r.stockQty>0?'font-bold text-blue-700':'text-slate-300'">{{fmt(r.stockQty)}}</td>
-              <td class="p-2 text-right text-slate-500">{{r.stockQty>0?fmt(r.stockWAC):'-'}}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- WIP / อื่นๆ -->
-    <div v-if="reconWIP.length" class="bg-white rounded-xl shadow overflow-hidden">
-      <div class="px-4 py-2 bg-slate-100 border-b border-slate-200">
-        <h3 class="font-bold text-slate-700 text-sm">⚪ WIP / อื่นๆ ({{reconWIP.length}} รายการ)</h3>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="p-2 text-left">รหัส / สินค้า</th>
-              <th class="p-2 text-left">หมวด · Status</th>
-              <th class="p-2 text-right text-purple-700">PO On-Order</th>
-              <th class="p-2 text-right text-emerald-700">Spot in Pool</th>
-              <th class="p-2 text-right text-blue-700">Stock จริง</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in reconWIP" :key="r.productId" class="border-t">
-              <td class="p-2"><span class="font-mono text-slate-500">{{r.productCode}}</span> {{r.productName}}</td>
-              <td class="p-2 text-slate-600">{{r.metalGroup}} · {{r.itemStatus}}</td>
-              <td class="p-2 text-right">{{fmt(r.poOnOrderQty)}}</td>
-              <td class="p-2 text-right">{{fmt(r.spotInPoolQty)}}</td>
-              <td class="p-2 text-right">{{fmt(r.stockQty)}}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div v-if="!reconRM.length && !reconFG.length && !reconWIP.length" class="bg-white rounded-xl shadow p-8 text-center text-slate-400">
-      ยังไม่มีข้อมูล Pool / Stock — เมื่อมี PO Buy / บิลซื้อ / Sales ระบบจะคำนวณให้อัตโนมัติ
+    <div v-if="!pendingSaleTable.length" class="bg-white rounded-xl shadow p-8 text-center text-slate-400">
+      ยังไม่มีข้อมูล ทองแดง / ทองเหลือง — เมื่อมี PO Buy / บิลซื้อ / PO Sell ระบบจะคำนวณให้อัตโนมัติ
     </div>
   </div>`
 });
@@ -32827,7 +33079,11 @@ app.component('view-plStatement', {
       const dep = _finDepreciation(db, fromX, toX, branchId.value);
       const intExp = _finInterestExp(db, fromX, toX);
       const fxItems = _trkSafe(db.fxGainLoss).filter(f => f && f.date>=fromX && f.date<=toX);
-      const fxNet = fxItems.reduce((s,f)=>s+Number(f.gainLoss||0),0);
+      // 🆕 PATCH 29D (2026-05-19): Fix field name — overseasReceipt + view-receipt save with `fxGainLossAmount`
+      const fxNet = fxItems.reduce((s,f)=>s+Number(f.fxGainLossAmount||f.gainLoss||0),0);
+      // 🆕 PATCH 29D: Split into Other Income (gain) and Other Expense (loss) for proper P&L presentation
+      const fxGainTotal = fxItems.filter(f => Number(f.fxGainLossAmount||f.gainLoss||0) > 0).reduce((s,f)=>s+Number(f.fxGainLossAmount||f.gainLoss||0),0);
+      const fxLossTotal = Math.abs(fxItems.filter(f => Number(f.fxGainLossAmount||f.gainLoss||0) < 0).reduce((s,f)=>s+Number(f.fxGainLossAmount||f.gainLoss||0),0));
       // Pick active cogs based on UI toggle
       const cogs = costBasisView.value === 'DEAL' ? cogs_deal : cogs_wac;
       const stockCogs = costBasisView.value === 'DEAL' ? stockCogs_deal : stockCogs_wac;
@@ -32857,7 +33113,9 @@ app.component('view-plStatement', {
         stockRev, stockCogs, stockGP, tradingRev, tradingCogs, tradingGP, tradingUnmatched,
         // 🆕 PATCH 26: dual view fields
         cogs_wac, cogs_deal, gp_wac, gp_deal, gp_diff, cogs_diff, np_wac, np_deal,
-        dualReplacedCount: cogs_deal.dualReplacedCount || 0 };
+        dualReplacedCount: cogs_deal.dualReplacedCount || 0,
+        // 🆕 PATCH 29D: Other Income/Expense breakdown
+        fxGainTotal, fxLossTotal };
     }
 
     const data = computed(() => computeFor(effRange.value.from, effRange.value.to));
@@ -32883,6 +33141,9 @@ app.component('view-plStatement', {
         dep: months.reduce((s,x)=>s+x.dep.total,0),
         intExp: months.reduce((s,x)=>s+x.intExp.total,0),
         fxNet: months.reduce((s,x)=>s+x.fxNet,0),
+        // 🆕 PATCH 29D: Other Income/Expense totals
+        fxGainTotal: months.reduce((s,x)=>s+(x.fxGainTotal||0),0),
+        fxLossTotal: months.reduce((s,x)=>s+(x.fxLossTotal||0),0),
         opProfit: months.reduce((s,x)=>s+x.opProfit,0),
         netProfit: months.reduce((s,x)=>s+x.netProfit,0),
         opExp: months.reduce((s,x)=>s+x.opExp,0),
@@ -33355,10 +33616,16 @@ app.component('view-plStatement', {
               <td v-for="(m,i) in yearlyData.months" :key="i" class="p-2 text-right text-red-600">{{m.intExp.total?'('+fmt(m.intExp.total)+')':'-'}}</td>
               <td class="p-2 text-right text-red-600 bg-emerald-50/50">({{fmt(yearlyData.totals.intExp)}})</td>
             </tr>
-            <tr class="border-t">
-              <td class="p-2 pl-6 text-xs sticky left-0 bg-white z-10">FX Gain/(Loss)</td>
-              <td v-for="(m,i) in yearlyData.months" :key="i" class="p-2 text-right" :class="m.fxNet>=0?'text-emerald-700':'text-red-600'">{{m.fxNet?fmt(m.fxNet):'-'}}</td>
-              <td class="p-2 text-right bg-emerald-50/50" :class="yearlyData.totals.fxNet>=0?'text-emerald-700':'text-red-600'">{{fmt(yearlyData.totals.fxNet)}}</td>
+            <!-- 🆕 PATCH 29D: Split FX Gain (Other Income) and FX Loss (Other Expense) -->
+            <tr class="border-t" v-if="yearlyData.totals.fxGainTotal">
+              <td class="p-2 pl-6 text-xs sticky left-0 bg-white z-10">🟢 FX Gain (Other Income)</td>
+              <td v-for="(m,i) in yearlyData.months" :key="i" class="p-2 text-right text-emerald-700">{{m.fxGainTotal?fmt(m.fxGainTotal):'-'}}</td>
+              <td class="p-2 text-right bg-emerald-50/50 text-emerald-700">{{fmt(yearlyData.totals.fxGainTotal)}}</td>
+            </tr>
+            <tr class="border-t" v-if="yearlyData.totals.fxLossTotal">
+              <td class="p-2 pl-6 text-xs sticky left-0 bg-white z-10">🔴 FX Loss (Other Expense)</td>
+              <td v-for="(m,i) in yearlyData.months" :key="i" class="p-2 text-right text-red-600">{{m.fxLossTotal?'('+fmt(m.fxLossTotal)+')':'-'}}</td>
+              <td class="p-2 text-right bg-red-50/50 text-red-600">({{fmt(yearlyData.totals.fxLossTotal)}})</td>
             </tr>
 
             <!-- Net Profit -->
@@ -33402,11 +33669,23 @@ app.component('view-plStatement', {
           <tr class="border-t font-medium bg-amber-100"><td class="p-2">Total Operating Expenses</td><td class="p-2 text-right text-red-700">({{fmt(data.opExp)}})</td></tr>
           <tr class="border-t bg-blue-100 font-bold"><td class="p-2">Operating Profit</td><td class="p-2 text-right">{{fmt(data.opProfit)}}</td></tr>
 
+          <!-- 🆕 PATCH 29D (2026-05-19): Other Income / Other Expense — FX Gain/Loss แยกบรรทัด -->
+          <tr v-if="data.fxGainTotal>0 || data.fxLossTotal>0" class="bg-teal-50 font-bold border-t"><td class="p-2" colspan="2">Other Income / Expense</td></tr>
+          <tr v-if="data.fxGainTotal>0" class="border-t hover:bg-slate-50 cursor-pointer" @click="showDrill('FX Gain (รับเงินส่งออก)', data.fxItems.filter(g=>Number(g.fxGainLossAmount||g.gainLoss||0)>0).map(g=>({id:g.id,date:g.date,no:g.referenceDocNo||g.transactionId,ref:g.currency+' '+fmt(g.foreignAmount)+' @ '+fmt(g.settlementFxRate),amt:Number(g.fxGainLossAmount||g.gainLoss||0)})))">
+            <td class="p-2 pl-6">🟢 FX Gain (Other Income) 🔍</td><td class="p-2 text-right text-emerald-700 font-medium">{{fmt(data.fxGainTotal)}}</td>
+          </tr>
+          <tr v-if="data.fxLossTotal>0" class="border-t hover:bg-slate-50 cursor-pointer" @click="showDrill('FX Loss (รับเงินส่งออก)', data.fxItems.filter(g=>Number(g.fxGainLossAmount||g.gainLoss||0)<0).map(g=>({id:g.id,date:g.date,no:g.referenceDocNo||g.transactionId,ref:g.currency+' '+fmt(g.foreignAmount)+' @ '+fmt(g.settlementFxRate),amt:Number(g.fxGainLossAmount||g.gainLoss||0)})))">
+            <td class="p-2 pl-6">🔴 FX Loss (Other Expense) 🔍</td><td class="p-2 text-right text-red-600">({{fmt(data.fxLossTotal)}})</td>
+          </tr>
+          <tr v-if="data.fxGainTotal>0 || data.fxLossTotal>0" class="border-t font-medium bg-teal-50">
+            <td class="p-2">Net Other Income / (Expense)</td>
+            <td class="p-2 text-right" :class="data.fxNet>=0?'text-emerald-700':'text-red-600'">{{fmt(data.fxNet)}}</td>
+          </tr>
+
           <tr class="bg-purple-50 font-bold border-t"><td class="p-2" colspan="2">Finance Cost</td></tr>
           <tr class="border-t hover:bg-slate-50 cursor-pointer" @click="showDrill('Interest Expense', data.intExp.items)">
             <td class="p-2 pl-6">Interest Expense 🔍</td><td class="p-2 text-right text-red-600">({{fmt(data.intExp.total)}})</td>
           </tr>
-          <tr class="border-t"><td class="p-2 pl-6">FX Gain/(Loss)</td><td class="p-2 text-right" :class="data.fxNet>=0?'text-emerald-700':'text-red-600'">{{fmt(data.fxNet)}}</td></tr>
 
           <tr class="border-t-2 border-double bg-emerald-200 font-bold text-lg"><td class="p-2">Net Profit Before Tax ({{data.npPct.toFixed(2)}}%)</td><td class="p-2 text-right" :class="data.netProfit>=0?'text-emerald-800':'text-red-700'">{{fmt(data.netProfit)}}</td></tr>
         </tbody>
@@ -49507,6 +49786,9 @@ app.component('view-statusConvert', {
     }
   } catch (e) {
     console.warn('[IDB] init error, fallback to localStorage:', e);
+  }
+  if (typeof window.registerTrackAssetOverview === 'function') {
+    window.registerTrackAssetOverview(app);
   }
   app.mount('#app');
   // 🆕 แสดง storage status ใน console หลัง mount
