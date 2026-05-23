@@ -8923,7 +8923,8 @@ const app = createApp({
         {view:'poSell', label:'PO Sell (จองขาย)', icon:'📃'},
         {view:'costPool', label:'Cost Pool', icon:'🪣'},
         {view:'costAllocator', label:'Cost Allocator (ทอง/เหลือง)', icon:'🎯'},
-        {view:'waitingAllocations', label:'Waiting Allocations', icon:'⏳'},
+        {view:'waitingAllocations', label:'Waiting Allocations (รวม Grade Adj.)', icon:'⏳'},
+        {view:'gradeAdjustment', label:'Grade Adjustment / ปรับเกรด', icon:'🔀'},
         {view:'costAllocationLedger', label:'Allocation Ledger', icon:'📒'},
         {view:'dualCostingReport', label:'Dual Costing Report', icon:'📊'},
         {view:'matchLog', label:'Match Log', icon:'🔗'},
@@ -23289,7 +23290,7 @@ app.component('view-costAllocator', {
     const candidates = ref([]);
     /* 🆕 WEIGHT-DIFF ADJUSTMENT — รับ delta จาก Waiting Allocation Queue */
     const adjustmentMode = ref(false);
-    const adjustmentInfo = ref(null);   // { delta, targetQty, delivered, poSellId }
+    const adjustmentInfo = ref(null);   // { delta, targetQty, delivered, poSellId, lotMode }
     // 🆕 PHASE 2.D: Pick up preselect state from Waiting Allocation Queue
     Vue.onMounted(() => {
       try {
@@ -23302,12 +23303,28 @@ app.component('view-costAllocator', {
           /* 🆕 Adjustment mode */
           if (pre.adjustmentMode) {
             adjustmentMode.value = true;
+            const allocMode = pre.adjustmentAllocMode || 'Expensive';
             adjustmentInfo.value = {
               delta: pre.adjustmentDelta || 0,
               targetQty: pre.adjustmentTargetQty || 0,
               delivered: pre.adjustmentDelivered || 0,
-              poSellId: pre.poSellId || ''
+              poSellId: pre.poSellId || '',
+              allocMode,
+              targetCost: pre.adjustmentTargetCost || 0
             };
+            /* 🆕 auto-set allocation mode + trigger autoMatch after mount */
+            allocationMode.value = allocMode;   // FIFO | Cheap | Expensive | Manual
+            if (allocMode === 'Manual') targetUnitCost.value = pre.adjustmentTargetCost || 0;
+            setTimeout(() => {
+              try {
+                if (pre.adjustmentDelta > 0) {
+                  /* ขายเกิน → ตัด cost pool เพิ่ม ตาม mode */
+                  autoMatch();
+                  const lbl = allocMode === 'Manual' ? ('Manual target '+(pre.adjustmentTargetCost||0)+' ฿/กก.') : allocMode;
+                  if (erp.showToast) erp.showToast('⚡ Auto-allocate '+pre.adjustmentDelta.toFixed(2)+' กก. ('+lbl+')', 'success');
+                }
+              } catch(e) { console.warn('auto-trigger:', e); }
+            }, 300);
           }
           delete window._waitingAllocatorPreselect;
         }
@@ -23431,9 +23448,13 @@ app.component('view-costAllocator', {
       candidates.value = [];
       manualResult.value = null;
       const t = selectedTarget.value;
-      if (!t || remainingNeed.value <= 0) return;
+      /* 🆕 Adjustment mode override — ใช้ delta แทน remainingNeed */
+      const isAdjOverflow = adjustmentMode.value && adjustmentInfo.value && adjustmentInfo.value.delta > 0;
+      const needQty = isAdjOverflow ? Math.abs(adjustmentInfo.value.delta) : remainingNeed.value;
+      if ((!t && !isAdjOverflow) || needQty <= 0) return;
+      const productId = (isAdjOverflow && selectedProductId.value) || (t && t.productId);
       const pool = erp.buildCostPool().filter(p =>
-        p.product_id === t.productId && p.available_qty > 0
+        p.product_id === productId && p.available_qty > 0
       );
       /* 🆕 MANUAL MODE — target cost balancer */
       if (allocationMode.value === 'Manual') {
@@ -23460,7 +23481,7 @@ app.component('view-costAllocator', {
       else if (allocationMode.value === 'Cheap') pool.sort((a,b)=>a.unit_cost-b.unit_cost);
       else if (allocationMode.value === 'Expensive') pool.sort((a,b)=>b.unit_cost-a.unit_cost);
 
-      let need = remainingNeed.value;
+      let need = needQty;
       for (const p of pool) {
         if (need <= 0) break;
         const useQty = Math.min(p.available_qty, need);
@@ -23727,15 +23748,31 @@ app.component('view-costAllocator', {
   <div>
     <!-- 🆕 ADJUSTMENT MODE BANNER — แสดงเมื่อมาจาก Waiting Allocation weight-diff -->
     <div v-if="adjustmentMode && adjustmentInfo" class="bg-gradient-to-r from-red-50 to-amber-50 border-2 border-red-300 rounded-xl p-4 mb-4 shadow-md">
-      <div class="text-lg font-bold text-red-900 flex items-center gap-2">⚖️ โหมดปรับการตัด Cost Pool — น้ำหนัก SB ไม่ตรง PO</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-sm">
+      <div class="flex justify-between items-start">
+        <div class="text-lg font-bold text-red-900 flex items-center gap-2">⚖️ โหมดปรับการตัด Cost Pool — น้ำหนัก SB ไม่ตรง PO</div>
+        <div class="text-xs px-3 py-1 rounded-full font-bold"
+             :class="{
+               'bg-red-200 text-red-900': adjustmentInfo.allocMode==='Expensive',
+               'bg-emerald-200 text-emerald-900': adjustmentInfo.allocMode==='Cheap',
+               'bg-blue-200 text-blue-900': adjustmentInfo.allocMode==='FIFO',
+               'bg-amber-200 text-amber-900': adjustmentInfo.allocMode==='Manual'
+             }">
+          {{ ({Expensive:'💎 ใช้ lot แพงสุด', Cheap:'💰 ใช้ lot ถูกสุด', FIFO:'📅 FIFO', Manual:'🎯 Manual @ '+adjustmentInfo.targetCost+' ฿/กก.'})[adjustmentInfo.allocMode] }}
+        </div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
         <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">PO Sell จอง</div><div class="font-bold">{{fmt(adjustmentInfo.targetQty)}} กก.</div></div>
         <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">SB ส่งจริง</div><div class="font-bold">{{fmt(adjustmentInfo.delivered)}} กก.</div></div>
-        <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">ส่วนต่าง</div><div class="font-bold" :class="adjustmentInfo.delta > 0 ? 'text-red-700' : 'text-amber-700'">{{adjustmentInfo.delta > 0 ? '+' : ''}}{{fmt(adjustmentInfo.delta)}}</div></div>
-        <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">การปรับ</div><div class="font-bold text-purple-700">{{adjustmentInfo.delta > 0 ? '📈 ลดการตัด (ส่งเกิน)' : '📉 เพิ่มการตัด (ส่งขาด)'}}</div></div>
+        <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">ส่วนต่าง</div><div class="font-bold" :class="adjustmentInfo.delta > 0 ? 'text-red-700' : 'text-amber-700'">{{adjustmentInfo.delta > 0 ? '+' : ''}}{{fmt(adjustmentInfo.delta)}} กก.</div></div>
+        <div class="bg-white rounded p-2"><div class="text-xs text-slate-500">การปรับ</div><div class="font-bold text-purple-700">{{adjustmentInfo.delta > 0 ? '📈 ตัด Pool เพิ่ม (ขายเกิน)' : '📉 คืน Pool (ขายขาด)'}}</div></div>
       </div>
-      <div class="mt-2 text-xs text-red-700">
-        💡 <b>{{adjustmentInfo.delta > 0 ? 'ลดการตัด' : 'เพิ่มการตัด'}}</b> ของ cost pool ตามส่วนต่างนี้ — ระบบจะ pre-fill น้ำหนักที่ต้องปรับให้แล้ว
+      <div v-if="adjustmentInfo.delta > 0" class="mt-2 text-xs text-red-800 bg-white/60 rounded p-2">
+        💡 <b>ตัด Pool เพิ่ม:</b> ระบบเลือก {{Math.abs(adjustmentInfo.delta).toFixed(2)}} กก. ด้วย mode <b>{{adjustmentInfo.allocMode}}</b>
+        <span v-if="adjustmentInfo.allocMode==='Manual'"> @ target {{adjustmentInfo.targetCost}} ฿/กก.</span>
+        → กด <b>"✓ ยืนยัน Match"</b> เพื่อสร้าง Match Log
+      </div>
+      <div v-else class="mt-2 text-xs text-amber-800 bg-white/60 rounded p-2">
+        ⚠ <b>คืน Pool:</b> ต้องไปที่ <button @click="window._setView && window._setView('matchLog')" class="underline font-bold text-blue-700 hover:text-blue-900">📒 Match Log</button> → ลบหรือลด match log ของ PO {{adjustmentInfo.poSellId}} ออก {{Math.abs(adjustmentInfo.delta).toFixed(2)}} กก. (auto-reverse ยังไม่ implement — manual ก่อน)
       </div>
     </div>
     <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4 text-sm text-purple-800">
@@ -23996,12 +24033,22 @@ app.component('view-waitingAllocations', {
       };
     });
 
-    /* 🆕 ปรับ cost pool ตามส่วนต่าง — เปิด Cost Allocator พร้อม preset adjustment */
+    /* 🆕 State per-diff row: เลือก mode + target cost ในแต่ละ row */
+    const diffMode = reactive({});    // { [poSellId]: 'FIFO' | 'Cheap' | 'Expensive' | 'Manual' }
+    const diffTargetCost = reactive({});  // { [poSellId]: number }
+
+    /* 🆕 ปรับ cost pool ตามส่วนต่าง — รองรับ 4 modes */
     function rebalanceCostPool(d) {
+      const mode = diffMode[d.poSellId] || 'Expensive';
+      const targetCost = Number(diffTargetCost[d.poSellId] || 0);
+      if (mode === 'Manual' && targetCost <= 0) {
+        alert('กรอก "ราคาต้นทุนเป้าหมาย" ก่อน — Manual mode ต้องใส่ target cost'); return;
+      }
+      const modeLabel = ({ FIFO:'📅 FIFO', Cheap:'💰 ถูกสุด', Expensive:'💎 แพงสุด', Manual:'🎯 Manual @ '+targetCost+' ฿/กก.' })[mode];
       const productName = erp.productName ? erp.productName(d.productId) : d.productId;
-      const action = d.diff > 0 ? 'เพิ่ม' : 'ลด';
+      const action = d.diff > 0 ? 'เพิ่มตัด' : 'ลดตัด';
       const absDiff = Math.abs(d.diff).toLocaleString('th-TH', { maximumFractionDigits: 2 });
-      const msg = `🎯 ปรับ Cost Pool — PO ${d.poSellNo}\n\nสินค้า: ${productName}\nเป้าหมาย PO: ${d.targetQty.toLocaleString('th-TH', { maximumFractionDigits: 2 })} กก.\nจัดส่งจริง: ${d.delivered.toLocaleString('th-TH', { maximumFractionDigits: 2 })} กก.\nส่วนต่าง: ${d.diff > 0 ? '+' : ''}${d.diff.toLocaleString('th-TH', { maximumFractionDigits: 2 })} กก. (${action}การตัด)\n\nบิลขายที่อ้างอิง: ${d.sbDocNos}\n\nต้องการเปิด Cost Allocator เพื่อปรับการตัด cost pool ตามจำนวนจริงหรือไม่?`;
+      const msg = `🎯 ปรับ Cost Pool — PO ${d.poSellNo}\n\nสินค้า: ${productName}\nส่วนต่าง: ${d.diff > 0 ? '+' : ''}${d.diff.toLocaleString('th-TH', { maximumFractionDigits: 2 })} กก. (${action} ${absDiff} กก.)\nวิธีปรับ: ${modeLabel}\n\nบิลขายที่อ้างอิง: ${d.sbDocNos}\n\nเปิด Cost Allocator พร้อม pre-fill?`;
       if (!confirm(msg)) return;
       try {
         window._waitingAllocatorPreselect = {
@@ -24012,8 +24059,11 @@ app.component('view-waitingAllocations', {
           adjustmentDelta: d.diff,
           adjustmentTargetQty: d.targetQty,
           adjustmentDelivered: d.delivered,
+          adjustmentAllocMode: mode,           // 🆕 FIFO | Cheap | Expensive | Manual
+          adjustmentTargetCost: targetCost,    // 🆕 ใช้เฉพาะ Manual
         };
-        if (window.$nav) window.$nav('costAllocator');
+        if (window._setView) window._setView('costAllocator');
+        else if (window.$nav) window.$nav('costAllocator');
         else location.hash = '#costAllocator';
       } catch (e) { console.warn('rebalance err:', e); }
     }
@@ -24077,8 +24127,46 @@ app.component('view-waitingAllocations', {
       } catch(e) { console.warn('[waitingAllocations] navigate err:', e); }
     }
 
+    /* 🆕 Grade Adjustment ที่ค้าง Match Cost (status = pending_cost / partial) */
+    const pendingGAs = computed(() => {
+      const arr = (db.gradeAdjustments || []).filter(g => g && g.status === 'posted' && (g.costStatus === 'pending_cost' || g.costStatus === 'partial'));
+      return arr.map(g => {
+        const tProd = (db.products || []).find(p => p && p.id === g.targetProductId);
+        const sProd = (db.products || []).find(p => p && p.id === g.sourceProductId);
+        return {
+          ...g,
+          targetProductName: tProd ? (tProd.code+' - '+tProd.name) : g.targetProductId,
+          sourceProductName: sProd ? (sProd.code+' - '+sProd.name) : g.sourceProductId,
+          targetMetalGroup: tProd ? tProd.metalGroup : '',
+          pendingQtyDisplay: Number(g.pendingQty || (g.costStatus === 'pending_cost' ? g.targetQty : 0)),
+        };
+      }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
+    });
+
+    const gaStats = computed(() => {
+      const arr = pendingGAs.value;
+      return {
+        count: arr.length,
+        fullPending: arr.filter(g => g.costStatus === 'pending_cost').length,
+        partial: arr.filter(g => g.costStatus === 'partial').length,
+        totalPendingQty: arr.reduce((s,g) => s + Number(g.pendingQtyDisplay || 0), 0),
+      };
+    });
+
+    /* 🆕 เปิด Grade Adjustment เพื่อ match cost — set global hook then navigate */
+    function openGAToMatch(ga) {
+      try {
+        window._gaMatchCostPreselect = { gaId: ga.id, docNo: ga.docNo };
+        if (window._setView) window._setView('gradeAdjustment');
+        else if (window.$nav) window.$nav('gradeAdjustment');
+        else location.hash = '#gradeAdjustment';
+      } catch(e) { console.warn('openGAToMatch:', e); }
+    }
+
     return { db, erp, search, filterStatus, filterCategory, pending, stats, openInAllocator, fmt:erp.fmt,
-             weightDiffs, diffStats, rebalanceCostPool, showDiffDetail,   /* 🆕 weight diff */
+             weightDiffs, diffStats, rebalanceCostPool, showDiffDetail,
+             diffMode, diffTargetCost,   /* 🆕 mode picker state */
+             pendingGAs, gaStats, openGAToMatch,
              productName: (id)=>erp.productName?erp.productName(id):id,
              customerName: (id)=>erp.customerName?erp.customerName(id):id };
   },
@@ -24128,14 +24216,23 @@ app.component('view-waitingAllocations', {
                 {{d.diff > 0 ? '+' : ''}}{{fmt(d.diff)}}
               </td>
               <td class="p-2 text-xs">{{d.sbDocNos}}</td>
-              <td class="p-2 text-center">
-                <button @click="rebalanceCostPool(d)" class="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded font-bold">⚖️ ปรับการตัด</button>
+              <td class="p-2 text-center" style="min-width:230px">
+                <div class="flex flex-col gap-1">
+                  <select v-model="diffMode[d.poSellId]" class="px-2 py-1 border rounded text-xs bg-white">
+                    <option value="Expensive">💎 แพงสุด (default)</option>
+                    <option value="Cheap">💰 ถูกสุด</option>
+                    <option value="FIFO">📅 FIFO (เก่าก่อน)</option>
+                    <option value="Manual">🎯 Manual — ใส่เป้าหมายต้นทุน</option>
+                  </select>
+                  <input v-if="diffMode[d.poSellId]==='Manual'" type="number" step="0.01" v-model.number="diffTargetCost[d.poSellId]" placeholder="ราคาเป้าหมาย ฿/กก." class="px-2 py-1 border rounded text-xs text-right bg-amber-50 border-amber-400">
+                  <button @click="rebalanceCostPool(d)" class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded font-bold">⚖️ ปรับการตัด</button>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
         <div class="mt-2 text-xs text-slate-600 italic">
-          💡 <b>+</b> = ส่งเกิน → ลดการตัด cost pool เพิ่มเติม / <b>−</b> = ส่งขาด → เพิ่มการตัดตามต้นทุนที่เหลือใน pool
+          💡 <b>+</b> = ขายเกิน → ตัด Pool เพิ่ม · <b>−</b> = ขายขาด → คืน Pool · เลือก mode: <b>แพงสุด/ถูกสุด/FIFO/Manual</b> (Manual ใส่ราคาเป้าหมายต้นทุน — ระบบผสมแพง+ถูก balance ให้)
         </div>
       </div>
     </div>
@@ -24148,13 +24245,72 @@ app.component('view-waitingAllocations', {
       </div>
     </div>
 
+    <!-- 🆕 GRADE ADJUSTMENT — ค้าง Match Cost -->
+    <div v-if="pendingGAs.length > 0" class="bg-cyan-50 border-2 border-cyan-300 rounded-xl p-4 mb-4 shadow-md">
+      <div class="flex justify-between items-start mb-3">
+        <div>
+          <div class="text-lg font-bold text-cyan-900 flex items-center gap-2">
+            🔀 Grade Adjustment ค้าง Match ต้นทุน — {{gaStats.count}} ใบ
+          </div>
+          <div class="text-xs text-cyan-700 mt-1">ปรับเกรดที่ posted แล้ว แต่ยังไม่ได้ allocate cost จาก Cost Pool — ต้องเข้าไป Match เพื่อให้ cost pool ถูกตัดสะอาด</div>
+          <div class="flex flex-wrap gap-3 mt-2 text-xs">
+            <span v-if="gaStats.fullPending > 0" class="px-2 py-1 bg-red-100 text-red-800 rounded font-bold">🔴 ยังไม่เริ่ม {{gaStats.fullPending}} ใบ</span>
+            <span v-if="gaStats.partial > 0" class="px-2 py-1 bg-amber-100 text-amber-800 rounded font-bold">🟡 บางส่วน {{gaStats.partial}} ใบ</span>
+            <span class="px-2 py-1 bg-cyan-100 text-cyan-800 rounded font-bold">🏋 รวมรอ {{fmt(gaStats.totalPendingQty)}} กก.</span>
+          </div>
+        </div>
+      </div>
+      <div class="bg-white rounded-lg p-3 border border-cyan-200 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-cyan-100">
+            <tr>
+              <th class="p-2 text-left">เลขที่ GA</th>
+              <th class="p-2 text-left">วันที่</th>
+              <th class="p-2 text-left">Source (ของเก่า)</th>
+              <th class="p-2 text-left">Target (ของใหม่)</th>
+              <th class="p-2 text-center">หมวด</th>
+              <th class="p-2 text-right">Target Qty</th>
+              <th class="p-2 text-right">ค้าง Cost</th>
+              <th class="p-2 text-center">สถานะ</th>
+              <th class="p-2 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in pendingGAs" :key="g.id" class="border-t hover:bg-cyan-50/30">
+              <td class="p-2 font-mono font-bold">{{g.docNo}}</td>
+              <td class="p-2 text-xs">{{g.date}}</td>
+              <td class="p-2 text-xs">{{g.sourceProductName}}</td>
+              <td class="p-2 text-xs font-bold">{{g.targetProductName}}</td>
+              <td class="p-2 text-center">
+                <span v-if="g.targetMetalGroup" class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs">{{g.targetMetalGroup}}</span>
+                <span v-else class="text-slate-400 text-xs">-</span>
+              </td>
+              <td class="p-2 text-right">{{fmt(g.targetQty)}}</td>
+              <td class="p-2 text-right font-bold text-cyan-700">{{fmt(g.pendingQtyDisplay)}} กก.</td>
+              <td class="p-2 text-center">
+                <span v-if="g.costStatus==='pending_cost'" class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold">🔴 ยังไม่เริ่ม</span>
+                <span v-else class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-bold">🟡 บางส่วน</span>
+              </td>
+              <td class="p-2 text-center">
+                <button @click="openGAToMatch(g)" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 text-white text-xs rounded font-bold">→ Match Cost</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="text-xs text-slate-500 mt-2 italic">
+        💡 Grade Adjustment ใช้ Cost Pool เดียวกับ PO Sell / SB → ต้อง match cost จาก lot จริงเพื่อตัด available_qty
+      </div>
+    </div>
+
     <!-- Stats -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">รวมรายการรอ</div><div class="text-2xl font-bold text-amber-700">{{stats.count}}</div></div>
-      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">ยังไม่เริ่ม allocate</div><div class="text-2xl font-bold text-red-600">{{stats.fullyPending}}</div></div>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">SB รอ allocate</div><div class="text-2xl font-bold text-amber-700">{{stats.count}}</div></div>
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">ยังไม่เริ่ม</div><div class="text-2xl font-bold text-red-600">{{stats.fullyPending}}</div></div>
       <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">บางส่วน</div><div class="text-2xl font-bold text-amber-600">{{stats.partial}}</div></div>
-      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">น้ำหนักรอ allocate</div><div class="text-xl font-bold text-blue-700">{{fmt(stats.totalQty)}} กก.</div></div>
-      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">มูลค่าขายรอ Match</div><div class="text-xl font-bold text-emerald-700">฿{{fmt(stats.totalRev)}}</div></div>
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">น้ำหนักรอ SB</div><div class="text-lg font-bold text-blue-700">{{fmt(stats.totalQty)}} กก.</div></div>
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">มูลค่า SB รอ Match</div><div class="text-lg font-bold text-emerald-700">฿{{fmt(stats.totalRev)}}</div></div>
+      <div class="bg-cyan-50 rounded-lg shadow p-3 border border-cyan-300"><div class="text-xs text-cyan-700 font-bold">🔀 GA รอ Match</div><div class="text-2xl font-bold text-cyan-700">{{gaStats.count}}</div><div class="text-[10px] text-cyan-600">{{fmt(gaStats.totalPendingQty)}} กก.</div></div>
     </div>
 
     <!-- By Category -->
@@ -44172,6 +44328,23 @@ app.component('view-gradeAdjustment', {
       erp.showToast(`✓ Confirm Cost สำเร็จ — ${g.docNo}${preview.hasShortage?' ('+choice+')':''}`,'success');
       showConfirmCost.value = false;
     }
+
+    /* 🆕 Receive preselect จาก Waiting Allocations — auto-open Match Cost modal */
+    Vue.onMounted(() => {
+      try {
+        const pre = window._gaMatchCostPreselect;
+        if (pre && pre.gaId) {
+          delete window._gaMatchCostPreselect;
+          setTimeout(() => {
+            const ga = (db.gradeAdjustments || []).find(g => g && g.id === pre.gaId);
+            if (ga) {
+              openConfirmCost(ga);
+              if (erp.showToast) erp.showToast('🎯 เปิด Match Cost ของ '+ga.docNo+' แล้ว', 'success');
+            } else if (erp.showToast) erp.showToast('ไม่พบ GA '+pre.docNo, 'error');
+          }, 200);
+        }
+      } catch(e) { console.warn('[GA preselect]', e); }
+    });
 
     return { erp, db, fmt, search, list, totals, showForm, form, editId,
       openAdd, close: close_, save, reverse, availableSourceStock,
