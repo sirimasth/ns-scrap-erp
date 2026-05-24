@@ -2721,6 +2721,10 @@ function seedData() {
       {id:'FX-003', date:new Date().toISOString().slice(0,10), fromCurrency:'EUR', toCurrency:'THB', rateType:'BOT Rate', rate:38.20, source:'BOT'},
       {id:'FX-004', date:new Date().toISOString().slice(0,10), fromCurrency:'JPY', toCurrency:'THB', rateType:'BOT Rate', rate:0.235, source:'BOT'},
     ],
+    /* 🆕 V17 (2026-05-24): FX Contracts — locked rates with daily adjustment */
+    fxContracts: [],
+    /* Each contract: {id, contractNo, signedDate, dueDate, amount, currency:'USD',
+       lockedRate, dailyAdjustment, counterparty, notes, status, closedDate, closedRate} */
     paymentMethods: [
       {id:'PM-001', name:'Cash', type:'Cash', active:true},
       {id:'PM-002', name:'Bank Transfer', type:'Bank Transfer', active:true},
@@ -3317,7 +3321,7 @@ function loadDB() {
       'stockLedger','bankStatement','accounts','suppliers','customers','products','branches','warehouses',
       'purchaseChannels','salesChannels','expenseCategories','machines','productionLines',
       'productionOrders','productionInputs','productionOutputs','processCosts','productionReverses',
-      'poBuys','poSells','matchLogs','currencies','fxRates','paymentMethods','bankChargeTypes',
+      'poBuys','poSells','matchLogs','currencies','fxRates','fxContracts','paymentMethods','bankChargeTypes',
       'overseasBeneficiaries','remittancePurposes','supplierAdvances','customerAdvances','advanceAllocations',
       'intlTransfers','overseasReceipts','fxGainLoss','bankRecons','bankImports','transferStocks',
       'directors','auditLog','importLogs',
@@ -8921,7 +8925,7 @@ const app = createApp({
         {view:'salesCommission', label:'💼 Sales Tracking Dashboard', icon:'💼'},
         {view:'cashFlowCalendar', label:'Cash Flow Calendar', icon:'📅'},
         {view:'businessCalendar', label:'Business Calendar', icon:'🗓️'},
-        {view:'cashOthersSummary', label:'Cash & Others Summary', icon:'💰'},
+        /* 🆕 V19: ลบ duplicate "Cash & Others Summary" — ใช้ "Net Worth / Track Asset" ในหมวด Asset แทน */
       ]},
       { label:'Tracking 360°', items:[
         {view:'customerTracking', label:'Customer Tracking', icon:'👥'},
@@ -8972,12 +8976,10 @@ const app = createApp({
         {view:'customerAdvance', label:'รับล่วงหน้าจาก Customer', icon:'⏩'},
       ]},
       { label:'การเงินต่างประเทศ', items:[
-        {view:'intlTransfer', label:'โอนเงินต่างประเทศ', icon:'🌐'},
-        {view:'overseasReceipt', label:'รับเงินจากต่างประเทศ', icon:'📥'},
-        {view:'fxRate', label:'FX Rate Management', icon:'💱'},
-        {view:'fcdLedger', label:'FCD Ledger', icon:'💵'},
+        {view:'fxRate', label:'FX Rate + Contract (USD/THB)', icon:'💱'},
         {view:'fxGainLossReport', label:'FX Gain/Loss Report', icon:'📊'},
         {view:'bankRecon', label:'Bank Reconciliation', icon:'⚖️'},
+        /* 🆕 V17 (2026-05-24): ลบเมนู intlTransfer / overseasReceipt / fcdLedger — component ยังอยู่ */
       ]},
       { label:'สินค้า', items:[
         {view:'stockBalance', label:'สต๊อกคงเหลือ', icon:'📦'},
@@ -8999,7 +9001,7 @@ const app = createApp({
       ]},
       { label:'Finance / Accounting', items:[
         {view:'finDashboard', label:'Financial Dashboard', icon:'💼'},
-        {view:'ownerDaily',   label:'Owner Daily Control', icon:'☀️'},
+        /* 🆕 V20 (2026-05-24): ลบ ownerDaily duplicate — มีอยู่ในหน้าหลักแล้ว */
         {view:'cashFlowAnalysis', label:'Cash Flow Analysis', icon:'🔍'},
         {view:'cashFlowForecast', label:'CF Forecast Calendar', icon:'📅'},
         {view:'workingCapital', label:'Working Capital Analysis', icon:'⚙️'},
@@ -9010,13 +9012,13 @@ const app = createApp({
         {view:'balanceSheet', label:'งบดุล (Balance Sheet)', icon:'⚖️'},
         {view:'cashFlowStatement', label:'งบกระแสเงินสด', icon:'💧'},
         {view:'assetRegister', label:'Fixed Assets / ทรัพย์สิน', icon:'🏗️'},
-        {view:'depreciation', label:'ค่าเสื่อมราคา', icon:'📉'},
+        /* 🆕 V21 (2026-05-24): ลบ depreciation menu — component ยังอยู่เผื่อ deep link */
         {view:'assetDisposal', label:'จำหน่ายทรัพย์สิน', icon:'🗑️'},
         {view:'loanContracts', label:'Loan / Leasing / BSL', icon:'🏦'},
         {view:'loanDashboard', label:'Loan Dashboard', icon:'📊'},
-        {view:'trackAssetOverview', label:'Net Worth / Track Asset', icon:'💎'},
-        {view:'equityMaint',  label:'Equity / ทุนจดทะเบียน', icon:'👑'},
-        {view:'openingBalance', label:'⭐ Opening Balance / ตั้งต้นยอด', icon:'🚀'},
+        {view:'cashOthersSummary', label:'Net Worth / Track Asset', icon:'💎'},
+        /* 🆕 V21: equityMaint menu ลบออก — แสดงใน opening balance แทน */
+        {view:'openingBalance', label:'⭐ Opening Balance + Equity / ทุนจดทะเบียน', icon:'🚀'},
         {view:'historicalData', label:'📅 ข้อมูลย้อนหลัง ม.ค.-เม.ย. 2026 (ก่อน Go-Live)', icon:'📅'},
       ]},
       { label:'ข้อมูลหลัก', items:[
@@ -14155,11 +14157,17 @@ app.component('view-purchase', {
           db.stockLedger = safeArr(db.stockLedger).filter(s => !(s.refType === 'PB' && s.refId === id));
         }
 
+        /* 🆕 V19 (2026-05-24): track original supplier — กันการเปลี่ยน supplier ทำให้ tracking เพี้ยน */
+        const _oldBill = isEdit ? safeArr(db.purchaseBills).find(x => x && x.id === id) : null;
+        const _origSupplierId = _oldBill
+          ? (_oldBill.originalSupplierId || _oldBill.supplierId || f.supplierId)
+          : f.supplierId;
         const bill = {
           id, docNo: f.docNo, date: f.date,
           refNo: f.refNo || '',
           transactionMode: f.transactionMode || 'STOCK',
           supplierId: f.supplierId, branchId: f.branchId,
+          originalSupplierId: _origSupplierId,    /* 🆕 V19: เก็บ supplier เดิมไว้ใช้ track */
           warehouseId: isTrading ? '' : f.warehouseId, channelId: f.channelId,
           purchaseSource: f.purchaseSource || 'SPOT_BUY', poBuyId: f.poBuyId || '',
           purchaseType: 'เงินสด', note: f.note,
@@ -15560,7 +15568,10 @@ app.component('view-payment', {
         accountId: '', method: 'โอน',
         notes: '',
         lines: [emptyLine()],
-        splits: [{ id: newId('SP'), accountId: '', amount: 0 }]    // 🆕 รองรับจ่ายหลายบัญชี
+        splits: [{ id: newId('SP'), accountId: '', amount: 0 }],   // 🆕 รองรับจ่ายหลายบัญชี
+        /* 🆕 V20 (2026-05-24): paySource — บริษัท / กรรมการ / เงินสำรองจ่าย */
+        paySource: 'COMPANY',          // 'COMPANY' | 'DIRECTOR_LOAN' | 'PETTY_CASH'
+        recipientName: ''              // ชื่อกรรมการ/ผู้สำรองจ่าย (ใช้เมื่อ paySource ≠ COMPANY)
       };
     }
     function emptySplit() { return { id: newId('SP'), accountId: '', amount: 0 }; }
@@ -15635,6 +15646,10 @@ app.component('view-payment', {
             });
           }
         }
+        /* 🆕 V20: ตรวจ pettyAdvance ที่ผูกกับ voucher นี้ → load paySource */
+        const linkedAdv = safeArr(db.pettyAdvances).find(a => a && a.linkedPaymentVoucherId === voucherId);
+        const _paySource = linkedAdv ? linkedAdv.type : 'COMPANY';
+        const _recipientName = linkedAdv ? (linkedAdv.recipientName||'') : '';
         const f = {
           docNo: first.docNo || '-',
           date: first.date || todayStr(),
@@ -15642,6 +15657,8 @@ app.component('view-payment', {
           accountId: first.accountId || '',
           method: first.method || 'โอน',
           notes: first.notes || '',
+          paySource: _paySource,
+          recipientName: _recipientName,
           lines: rows.map((p, ridx) => {
             const bill = safeArr(db.purchaseBills).find(b => b && b.id === p.billId);
             /* 🆕 V15: หา advance allocations ที่ผูกกับ payment line นี้ */
@@ -15816,23 +15833,30 @@ app.component('view-payment', {
           f.docNo = await erp.ensureUniqueDocNoCloud(f.docNo, 'PMT', null);
           if (f.docNo !== oldDocNo) erp.showToast('⚡ พบเลขซ้ำ '+oldDocNo+' → '+f.docNo, 'warning');
         }
+        /* 🆕 V20: ถ้า paySource = Director/Petty → ข้าม validate splits/account (ไม่ตัดเงิน bank) */
+        const _useDirectorOrPetty = (f.paySource === 'DIRECTOR_LOAN' || f.paySource === 'PETTY_CASH');
+        if (_useDirectorOrPetty && !(f.recipientName||'').trim()) {
+          alert('ใส่ชื่อกรรมการ/ผู้สำรองจ่าย'); return;
+        }
         // 🆕 Auto-fill: if only 1 split with accountId but no amount → fill with netCashOut
         if (safeArr(f.splits).length === 1 && f.splits[0].accountId && num(f.splits[0].amount) === 0) {
           f.splits[0].amount = totals.value.netCashOut;
         }
         // Handle splits — if no splits configured, fallback to single accountId
         const validSplits = safeArr(f.splits).filter(s => s && s.accountId && num(s.amount) > 0);
-        if (validSplits.length === 0) {
-          // fallback to legacy single accountId
-          if (!f.accountId) { alert('เลือกบัญชีจ่าย'); return; }
-        }
-        if (validSplits.length > 1) {
-          // Validate: sum of splits must equal netCashOut
-          const splitSum = validSplits.reduce((s,x) => s + num(x.amount), 0);
-          const expected = totals.value.netCashOut;
-          if (Math.abs(splitSum - expected) > 0.01) {
-            alert('รวมยอดแยกบัญชี ('+splitSum.toFixed(2)+') ≠ ยอดสุทธิ ('+expected.toFixed(2)+')\nโปรดแก้ไขให้ตรงกัน');
-            return;
+        if (!_useDirectorOrPetty) {
+          if (validSplits.length === 0) {
+            // fallback to legacy single accountId
+            if (!f.accountId) { alert('เลือกบัญชีจ่าย'); return; }
+          }
+          if (validSplits.length > 1) {
+            // Validate: sum of splits must equal netCashOut
+            const splitSum = validSplits.reduce((s,x) => s + num(x.amount), 0);
+            const expected = totals.value.netCashOut;
+            if (Math.abs(splitSum - expected) > 0.01) {
+              alert('รวมยอดแยกบัญชี ('+splitSum.toFixed(2)+') ≠ ยอดสุทธิ ('+expected.toFixed(2)+')\nโปรดแก้ไขให้ตรงกัน');
+              return;
+            }
           }
         }
         const validLines = safeArr(f.lines).filter(l => l.billId && num(l.paymentAmount) > 0);
@@ -15864,6 +15888,10 @@ app.component('view-payment', {
           /* 🆕 V15: ลบ advance allocations เก่าของ voucher นี้ — จะเขียนใหม่ตาม validLines ปัจจุบัน */
           if (Array.isArray(db.advanceAllocations)) {
             db.advanceAllocations = db.advanceAllocations.filter(x => !(x && x.paymentVoucherId === voucherId));
+          }
+          /* 🆕 V20: ลบ pettyAdvance entry เก่าของ voucher นี้ (กรณีเปลี่ยน paySource) */
+          if (Array.isArray(db.pettyAdvances)) {
+            db.pettyAdvances = db.pettyAdvances.filter(a => !(a && a.linkedPaymentVoucherId === voucherId));
           }
         }
 
@@ -15951,21 +15979,51 @@ app.component('view-payment', {
             console.log('[payment-edit] PATCH 14b: cleaned', bsIdsArr.length, 'bs rows');
           }
         } catch(e) { console.warn('[clear cloud bs PMT]', e); }
-        const splitsToWrite = validSplits.length > 0
-          ? validSplits
-          : [{ accountId: f.accountId, amount: totals.value.netCashOut }];
-        // 🆕 Use deterministic IDs based on voucherId + split index — ป้องกัน duplicate insert
-        splitsToWrite.forEach((sp, idx) => {
-          db.bankStatement.push({
-            id: 'BS-PMT-' + voucherId + '-' + idx,   // ⭐ deterministic id (idempotent)
-            date: f.date, accountId: sp.accountId,
-            type: 'จ่ายเงินให้ Supplier',
-            desc: f.docNo + ' - ' + supplierLabel + (splitsToWrite.length > 1 ? ' (split '+(idx+1)+'/'+splitsToWrite.length+')' : ''),
-            in: 0, out: num(sp.amount),
-            refType: 'PMT', refId: voucherId, refNo: f.docNo,
-            createdBy: erp.currentUser.value?.username || '-'
+        /* 🆕 V20 (2026-05-24): เช็ค paySource — ถ้า Director/Petty → ไม่ตัด bank, สร้าง pettyAdvance แทน */
+        const isDirector = f.paySource === 'DIRECTOR_LOAN';
+        const isPetty = f.paySource === 'PETTY_CASH';
+        const useDirectorOrPetty = isDirector || isPetty;
+
+        if (useDirectorOrPetty) {
+          /* สร้าง pettyAdvance entry — บริษัทเป็นหนี้กรรมการ/ผู้สำรองจ่าย */
+          if (!Array.isArray(db.pettyAdvances)) db.pettyAdvances = [];
+          // ลบของเก่าก่อน (กรณี edit)
+          db.pettyAdvances = db.pettyAdvances.filter(a => !(a && a.linkedPaymentVoucherId === voucherId));
+          const advType = isDirector ? 'DIRECTOR_LOAN' : 'PETTY_CASH';
+          const advDocNo = (isDirector?'DLN-':'PCA-') + voucherId.slice(-8);
+          db.pettyAdvances.push({
+            id: 'PADV-PMT-' + voucherId,
+            docNo: advDocNo, date: f.date,
+            type: advType,
+            recipientName: f.recipientName || (isDirector ? 'กรรมการ' : 'ผู้สำรองจ่าย'),
+            amount: totals.value.netCashOut,
+            returnedAmount: 0,
+            status: 'active',
+            notes: 'จ่ายบิล: ' + f.docNo + ' - ' + supplierLabel,
+            linkedPaymentVoucherId: voucherId,
+            linkedPaymentDocNo: f.docNo,
+            createdBy: erp.currentUser.value?.username || '-',
+            createdAt: new Date().toISOString(),
           });
-        });
+          erp.logAudit && erp.logAudit('create-from-payment','pettyAdvance', null, { voucher: f.docNo, amount: totals.value.netCashOut, type: advType });
+        } else {
+          /* COMPANY (ปกติ) — เขียน bank statement ตามเดิม */
+          const splitsToWrite = validSplits.length > 0
+            ? validSplits
+            : [{ accountId: f.accountId, amount: totals.value.netCashOut }];
+          // 🆕 Use deterministic IDs based on voucherId + split index — ป้องกัน duplicate insert
+          splitsToWrite.forEach((sp, idx) => {
+            db.bankStatement.push({
+              id: 'BS-PMT-' + voucherId + '-' + idx,   // ⭐ deterministic id (idempotent)
+              date: f.date, accountId: sp.accountId,
+              type: 'จ่ายเงินให้ Supplier',
+              desc: f.docNo + ' - ' + supplierLabel + (splitsToWrite.length > 1 ? ' (split '+(idx+1)+'/'+splitsToWrite.length+')' : ''),
+              in: 0, out: num(sp.amount),
+              refType: 'PMT', refId: voucherId, refNo: f.docNo,
+              createdBy: erp.currentUser.value?.username || '-'
+            });
+          });
+        }
         showForm.value = false;
         editingVoucherId.value = null;
         // 🆕 Force push ทันทีและรอ — กัน auto-pull ดึง bill เก่ามาทับ paidAmount
@@ -16049,6 +16107,10 @@ app.component('view-payment', {
       /* 🆕 V15: ลบ advance allocations ของ voucher นี้ — คืน advance balance */
       if (Array.isArray(db.advanceAllocations)) {
         db.advanceAllocations = db.advanceAllocations.filter(x => !(x && x.paymentVoucherId === g.id));
+      }
+      /* 🆕 V20: ลบ pettyAdvance ของ voucher นี้ */
+      if (Array.isArray(db.pettyAdvances)) {
+        db.pettyAdvances = db.pettyAdvances.filter(a => !(a && a.linkedPaymentVoucherId === g.id));
       }
       // 🆕 ลบ Cloud
       if (paymentIds.length) await erp.deleteCloud('payments', paymentIds);
@@ -16336,8 +16398,27 @@ app.component('view-payment', {
             <div class="md:col-span-4"><label class="block text-xs mb-1">หมายเหตุ</label><input v-model="form.notes" class="w-full px-2 py-1.5 border rounded"></div>
           </div>
 
-          <!-- 💰 บัญชีจ่าย — รองรับหลายบัญชี (split payment) -->
-          <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-3">
+          <!-- 🆕 V20: เลือกแหล่งเงินที่ใช้จ่าย -->
+          <div class="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-lg p-3 mb-2">
+            <div class="text-xs font-bold text-amber-800 mb-2">💰 จ่ายโดย</div>
+            <div class="flex gap-2 flex-wrap">
+              <button type="button" @click="form.paySource='COMPANY'" :class="['px-4 py-2 rounded text-sm font-bold', form.paySource==='COMPANY' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border']">🏢 บริษัท (บัญชีบริษัท)</button>
+              <button type="button" @click="form.paySource='DIRECTOR_LOAN'" :class="['px-4 py-2 rounded text-sm font-bold', form.paySource==='DIRECTOR_LOAN' ? 'bg-purple-600 text-white' : 'bg-white text-slate-600 border']">👔 กรรมการ (เงินกรรมการ)</button>
+              <button type="button" @click="form.paySource='PETTY_CASH'" :class="['px-4 py-2 rounded text-sm font-bold', form.paySource==='PETTY_CASH' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 border']">🛒 เงินทดลอง/สำรองจ่าย</button>
+            </div>
+            <div v-if="form.paySource !== 'COMPANY'" class="mt-3 grid grid-cols-1 gap-2 bg-white rounded p-2 border border-amber-200">
+              <div>
+                <label class="text-xs font-bold text-amber-800">ชื่อกรรมการ / ผู้สำรองจ่าย *</label>
+                <input v-model="form.recipientName" placeholder="เช่น คุณสมชาย กรรมการ" class="w-full px-2 py-1.5 border rounded">
+              </div>
+              <div class="text-xs text-amber-700 italic">
+                💡 ระบบจะ <b>ไม่ตัดเงินจากบัญชีบริษัท</b> · จะสร้างรายการ "{{form.paySource==='DIRECTOR_LOAN' ? 'เงินกู้กรรมการ' : 'เงินสำรองจ่าย'}}" ค้างคืนเงิน — ดูที่หน้า <b>"เงินสำรองจ่าย / กู้กรรมการ"</b> เพื่อ track + คืนเงิน
+              </div>
+            </div>
+          </div>
+
+          <!-- 💰 บัญชีจ่าย — รองรับหลายบัญชี (split payment) — ซ่อนเมื่อ Director/Petty -->
+          <div v-if="form.paySource==='COMPANY'" class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-3">
             <div class="flex justify-between items-center mb-2">
               <h4 class="font-medium text-blue-900">💳 บัญชีจ่าย * <span class="text-xs text-slate-600 font-normal">(เลือกได้หลายบัญชี กรณีวงเงินเต็ม → split)</span></h4>
               <button @click="addSplit" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs">+ เพิ่มบัญชี</button>
@@ -26216,76 +26297,546 @@ app.component('view-compareMargin', {
 app.component('view-fxRate', {
   setup() {
     const erp = window.$erp; const db = erp.db;
-    const showForm = ref(false); const form = reactive({});
-    function open() {
-      Object.keys(form).forEach(k=>delete form[k]);
-      Object.assign(form, { date:erp.today(), fromCurrency:'USD', toCurrency:'THB', rateType:'Manual Rate', rate:0, source:'' });
-      showForm.value = true;
+    if (!Array.isArray(db.fxContracts)) db.fxContracts = [];
+
+    /* 🆕 V17 (2026-05-24): Current USD/THB rate (single source of truth) */
+    const currentRate = ref(0);
+    /* Initialize from latest USD rate */
+    function _loadCurrentRate() {
+      const latestUsd = db.fxRates
+        .filter(r => r.fromCurrency === 'USD' && r.toCurrency === 'THB')
+        .sort((a,b) => (b.date||'').localeCompare(a.date||''))[0];
+      currentRate.value = latestUsd ? Number(latestUsd.rate||0) : 36;
     }
-    function save() {
-      if (!form.rate || form.rate<=0) { erp.showToast('ใส่ FX Rate','error'); return; }
+    _loadCurrentRate();
+    function saveCurrentRate() {
+      if (currentRate.value <= 0) { alert('ใส่ rate'); return; }
       const id = erp.uid('FX');
-      db.fxRates.push(JSON.parse(JSON.stringify({...form, id, createdBy:erp.currentUser.value?.username||'-'})));
-      erp.logAudit('create','fxRate', null, form);
-      showForm.value = false; erp.showToast('บันทึก FX Rate แล้ว');
+      db.fxRates.push({ id, date: erp.today(), fromCurrency: 'USD', toCurrency: 'THB',
+        rateType: 'Manual Rate', rate: Number(currentRate.value), source: 'Manual',
+        createdBy: erp.currentUser.value?.username || '-' });
+      erp.logAudit && erp.logAudit('create','fxRate', null, { rate: currentRate.value });
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e) {}
+      erp.showToast('✓ บันทึก USD/THB = '+currentRate.value, 'success');
     }
-    function remove(r) {
-      if (!confirm('ลบ '+r.fromCurrency+'/'+r.toCurrency+' = '+r.rate+' ?')) return;
-      db.fxRates = db.fxRates.filter(x=>x.id!==r.id); erp.showToast('ลบแล้ว');
+
+    /* ════════════════════════════════════════════════════════════════
+       FX CONTRACTS — locked rate + daily adjustment
+       Adjusted rate at date D = lockedRate + (dailyAdjustment × days from signed)
+       ════════════════════════════════════════════════════════════════ */
+    const showContractForm = ref(false);
+    const contractForm = reactive({});
+    const editingContractId = ref(null);
+    function openContract(c = null) {
+      Object.keys(contractForm).forEach(k => delete contractForm[k]);
+      if (c) {
+        Object.assign(contractForm, JSON.parse(JSON.stringify(c)));
+        editingContractId.value = c.id;
+      } else {
+        Object.assign(contractForm, {
+          contractNo: 'FXC-'+erp.today().replace(/-/g,'')+'-'+String((db.fxContracts||[]).length+1).padStart(3,'0'),
+          signedDate: erp.today(),
+          dueDate: erp.today(),
+          amount: 0, currency: 'USD',
+          lockedRate: currentRate.value || 36,
+          dailyAdjustment: -0.0022,    // default ตามที่ user บอก
+          counterparty: '', notes: '',
+          status: 'active'
+        });
+        editingContractId.value = null;
+      }
+      showContractForm.value = true;
     }
-    const list = computed(()=>[...db.fxRates].sort((a,b)=>(b.date||'').localeCompare(a.date||'')));
-    /* Latest rates summary */
-    const latestRates = computed(() => {
-      const result = {};
-      db.currencies.filter(c=>c.code!=='THB' && c.active).forEach(c => {
-        result[c.code] = erp.getFxRate(c.code, 'THB');
+    function saveContract() {
+      if (!contractForm.contractNo) { alert('ใส่เลขสัญญา'); return; }
+      if (Number(contractForm.amount||0) <= 0) { alert('ใส่จำนวน USD'); return; }
+      if (Number(contractForm.lockedRate||0) <= 0) { alert('ใส่ Locked Rate'); return; }
+      if (editingContractId.value) {
+        const idx = db.fxContracts.findIndex(x => x && x.id === editingContractId.value);
+        if (idx >= 0) db.fxContracts[idx] = JSON.parse(JSON.stringify({...contractForm, id: editingContractId.value}));
+      } else {
+        db.fxContracts.push(JSON.parse(JSON.stringify({...contractForm, id: erp.uid('FXC'), createdBy: erp.currentUser.value?.username||'-', createdAt: new Date().toISOString()})));
+      }
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+      erp.logAudit && erp.logAudit('save','fxContract', null, contractForm);
+      erp.showToast('✓ บันทึก FX Contract', 'success');
+      showContractForm.value = false;
+    }
+    function removeContract(c) {
+      if (!confirm('ลบ '+c.contractNo+' ?')) return;
+      db.fxContracts = db.fxContracts.filter(x => x.id !== c.id);
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+    }
+    function closeContract(c) {
+      if (!confirm('ปิดสัญญา '+c.contractNo+' ?')) return;
+      const idx = db.fxContracts.findIndex(x => x && x.id === c.id);
+      if (idx >= 0) {
+        db.fxContracts[idx].status = 'closed';
+        db.fxContracts[idx].closedDate = erp.today();
+      }
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+    }
+
+    /* Compute adjusted rate at given date */
+    function computeAdjustedRate(contract, atDateStr) {
+      const lockedRate = Number(contract.lockedRate||0);
+      const dailyAdj = Number(contract.dailyAdjustment||0);
+      const signedDate = contract.signedDate;
+      if (!signedDate) return lockedRate;
+      const d1 = new Date(signedDate);
+      const d2 = new Date(atDateStr || erp.today());
+      const days = Math.max(0, Math.round((d2 - d1) / 86400000));
+      return lockedRate + (dailyAdj * days);
+    }
+
+    /* 🆕 V19 (2026-05-24): ฝั่ง EXPORT — เรารับ USD จากลูกค้า
+       กำไร/ขาดทุน FX = (Locked Rate − Current Market Rate) × USD
+       - ถ้า Locked > Current → กำไร (เราขายแพงกว่าตลาด)
+       - ถ้า Locked < Current → ขาดทุน (เราขายถูกกว่าตลาด — ตลาดดีกว่าสัญญา) */
+
+    /* Enriched contract list */
+    const contractList = computed(() => {
+      const today = erp.today();
+      return _trkSafe(db.fxContracts).map(c => {
+        const adjustedRateNow = computeAdjustedRate(c, today);
+        const adjustedRateAtDue = computeAdjustedRate(c, c.dueDate || today);
+        const daysSinceSigned = c.signedDate ? Math.max(0, Math.round((new Date(today) - new Date(c.signedDate)) / 86400000)) : 0;
+        const daysUntilDue = c.dueDate ? Math.round((new Date(c.dueDate) - new Date(today)) / 86400000) : 0;
+        /* 🆕 V19: Export side — gainLoss = (locked − current) × amount
+           positive = กำไร (locked > current) · negative = ขาดทุน (locked < current) */
+        const gainLossVsCurrent = (adjustedRateNow - Number(currentRate.value)) * Number(c.amount||0);
+        return { ...c, adjustedRateNow, adjustedRateAtDue, daysSinceSigned, daysUntilDue,
+          totalThbAtDue: Number(c.amount||0) * adjustedRateAtDue,
+          totalThbAtMarket: Number(c.amount||0) * Number(currentRate.value),
+          gainLossVsCurrent };
+      }).sort((a,b) => {
+        if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+        return (a.dueDate||'9999').localeCompare(b.dueDate||'9999');
       });
-      return result;
     });
-    return { db, erp, form, showForm, list, latestRates, open, save, remove, fmt:erp.fmt };
+
+    /* ════════════════════════════════════════════════════════════════
+       🆕 V19: USD RECEIVABLES — เราจะรับ USD (ฝั่ง export)
+       จาก: salesBills (foreign currency) ที่ยังไม่ได้รับเงิน
+       ════════════════════════════════════════════════════════════════ */
+    const usdReceivables = computed(() => {
+      const items = [];
+      // Foreign sales bills (customer owes us USD)
+      (db.salesBills||[]).filter(b => b && b.status !== 'cancelled' && String(b.currency||'THB').toUpperCase() === 'USD' && Number(b.receivableBalance||0) > 0.01).forEach(b => {
+        const billFx = Number(b.fxRate||1);
+        const usdRemain = billFx > 0 ? Number(b.receivableBalance||0) / billFx : 0;
+        items.push({
+          source: 'SB', docNo: b.docNo, customer: erp.customerName(b.customerId),
+          dueDate: b.date,
+          usdAmount: usdRemain,
+          billFxRate: billFx,
+        });
+      });
+      return items.sort((a,b) => (a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
+    });
+    const totalUsdReceivable = computed(() => usdReceivables.value.reduce((s,r) => s + Number(r.usdAmount||0), 0));
+    const totalUsdLocked = computed(() =>
+      _trkSafe(db.fxContracts).filter(c => c && c.status === 'active' && c.currency === 'USD').reduce((s,c) => s + Number(c.amount||0), 0)
+    );
+    const usdExposure = computed(() => Math.max(0, totalUsdReceivable.value - totalUsdLocked.value));
+
+    /* 🆕 V19 Sensitivity (Export side):
+       USD ขึ้น → เราได้ THB เพิ่ม (จาก exposure ที่ยังไม่ได้ lock)
+       USD ลง → เราเสีย THB
+       — สลับขั้วจาก import! */
+    const sensitivity = computed(() => {
+      const exp = usdExposure.value;
+      return {
+        plus010: exp * 0.10,     // USD ขึ้น = เราได้เพิ่ม (กำไร)
+        plus050: exp * 0.50,
+        plus100: exp * 1.00,
+        minus010: exp * -0.10,   // USD ลง = เราเสีย (ขาดทุน)
+        minus050: exp * -0.50,
+        minus100: exp * -1.00,
+      };
+    });
+
+    /* 🆕 V19: Net gain/loss from active contracts (vs current market) */
+    const totalGainLossLocked = computed(() => {
+      let total = 0;
+      contractList.value.filter(c => c.status === 'active').forEach(c => {
+        total += c.gainLossVsCurrent;
+      });
+      return total;
+    });
+
+    /* ════════════════════════════════════════════════════════════════
+       HEDGE CALCULATOR — Target rate analyzer
+       ════════════════════════════════════════════════════════════════ */
+    const hedgeCalc = reactive({
+      usdAmount: 0,
+      targetRate: 0,
+      currentRate: 0,
+      dailyAdjustment: -0.0022,
+    });
+    /* When user opens, init from current */
+    function _initHedgeCalc() {
+      hedgeCalc.currentRate = currentRate.value;
+      if (hedgeCalc.targetRate <= 0) hedgeCalc.targetRate = currentRate.value - 0.50;
+    }
+    watch(currentRate, () => { if (!hedgeCalc.currentRate) hedgeCalc.currentRate = currentRate.value; });
+    Vue.onMounted(() => _initHedgeCalc());
+
+    const hedgeCalcResult = computed(() => {
+      const usd = Number(hedgeCalc.usdAmount||0);
+      const curRate = Number(hedgeCalc.currentRate||0);
+      const target = Number(hedgeCalc.targetRate||0);
+      const dailyAdj = Number(hedgeCalc.dailyAdjustment||0);
+      if (usd <= 0 || curRate <= 0 || target <= 0) return null;
+      // ถ้า dailyAdj เป็นลบ → rate ลดทุกวัน → ต้องรอกี่วันถึงเรทเข้า target
+      let daysToTarget = 0;
+      if (Math.abs(dailyAdj) > 0.00001) {
+        if (target < curRate && dailyAdj < 0) {
+          // need rate to drop → wait
+          daysToTarget = Math.ceil((target - curRate) / dailyAdj);
+        } else if (target > curRate && dailyAdj > 0) {
+          daysToTarget = Math.ceil((target - curRate) / dailyAdj);
+        } else {
+          daysToTarget = -1;   // never reach
+        }
+      }
+      const targetDate = daysToTarget > 0 ? (() => {
+        const d = new Date(erp.today());
+        d.setDate(d.getDate() + daysToTarget);
+        return d.toISOString().slice(0,10);
+      })() : '';
+      const valueNowThb = usd * curRate;
+      const valueAtTargetThb = usd * target;
+      const diff = valueAtTargetThb - valueNowThb;    // positive = ได้ THB เพิ่ม (ถ้ารับ USD)
+      const pctDiff = curRate > 0 ? (diff / valueNowThb) * 100 : 0;
+      return { usd, curRate, target, dailyAdj, daysToTarget, targetDate,
+        valueNowThb, valueAtTargetThb, diff, pctDiff };
+    });
+
+    /* Save current rate auto when changed */
+    function applyHedgeRateAsContract() {
+      Object.assign(contractForm, {
+        contractNo: 'FXC-'+erp.today().replace(/-/g,'')+'-'+String((db.fxContracts||[]).length+1).padStart(3,'0'),
+        signedDate: erp.today(),
+        dueDate: erp.today(),
+        amount: hedgeCalc.usdAmount,
+        currency: 'USD',
+        lockedRate: hedgeCalc.currentRate,
+        dailyAdjustment: hedgeCalc.dailyAdjustment,
+        counterparty: '', notes: 'จาก Hedge Calculator',
+        status: 'active'
+      });
+      editingContractId.value = null;
+      showContractForm.value = true;
+    }
+
+    return { db, erp, fmt: erp.fmt,
+      currentRate, saveCurrentRate, _loadCurrentRate,
+      showContractForm, contractForm, editingContractId, openContract, saveContract, removeContract, closeContract,
+      computeAdjustedRate, contractList,
+      /* 🆕 V19: export-side naming */
+      usdReceivables, totalUsdReceivable, totalUsdLocked, usdExposure, sensitivity, totalGainLossLocked,
+      hedgeCalc, hedgeCalcResult, applyHedgeRateAsContract };
   },
   template: `
-  <div>
-    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-800">
-      <strong>FX Rate Management</strong> — เก็บอัตราแลกเปลี่ยนตามวันที่ ระบบจะใช้ rate ล่าสุด ณ วันที่ทำธุรกรรม
+  <div class="space-y-3">
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-blue-600 to-cyan-700 text-white rounded-xl p-4 shadow">
+      <h1 class="text-xl font-bold">💱 FX Rate + FX Contracts (USD/THB) — ฝั่ง Export</h1>
+      <p class="text-sm opacity-80 mt-1">เราเป็นผู้ <b>รับ USD</b> จากลูกค้าต่างประเทศ · ถ้า Locked Rate < Current Rate = <b>ขาดทุน</b> (ตลาดดีกว่า) · ถ้า Locked > Current = <b>กำไร</b> (สัญญาดีกว่า)</p>
     </div>
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-      <div v-for="(rate, ccy) in latestRates" :key="ccy" class="bg-white rounded-xl shadow p-3 text-center">
-        <div class="text-xs text-slate-500">{{ccy}} → THB</div>
-        <div class="text-2xl font-bold text-blue-600">{{fmt(rate)}}</div>
+
+    <!-- Current Rate -->
+    <div class="bg-white rounded-xl shadow p-4">
+      <div class="flex items-center gap-4 flex-wrap">
+        <div>
+          <div class="text-xs text-slate-500">💱 USD/THB ปัจจุบัน</div>
+          <div class="flex items-center gap-2 mt-1">
+            <input type="number" step="0.0001" v-model.number="currentRate" class="px-3 py-2 border rounded-lg text-2xl font-bold text-blue-700 w-48 text-right">
+            <button @click="saveCurrentRate" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold">💾 บันทึก</button>
+          </div>
+        </div>
+        <div class="flex-1"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-amber-50 rounded-lg p-3 border-l-4 border-amber-500 min-w-[180px]">
+            <div class="text-xs text-amber-700">💰 USD จะรับรวม</div>
+            <div class="text-xl font-bold text-amber-700">\${{fmt(totalUsdReceivable)}}</div>
+            <div class="text-[10px] text-amber-600">{{usdReceivables.length}} บิลขาย</div>
+          </div>
+          <div class="bg-emerald-50 rounded-lg p-3 border-l-4 border-emerald-500 min-w-[180px]">
+            <div class="text-xs text-emerald-700">🔒 Locked แล้ว</div>
+            <div class="text-xl font-bold text-emerald-700">\${{fmt(totalUsdLocked)}}</div>
+            <div class="text-[10px] text-emerald-600">{{contractList.filter(c=>c.status==='active').length}} contracts</div>
+          </div>
+          <div class="bg-red-50 rounded-lg p-3 border-l-4 border-red-600 min-w-[180px]">
+            <div class="text-xs text-red-700">🚨 ยังเสี่ยง (Exposure)</div>
+            <div class="text-xl font-bold text-red-700">\${{fmt(usdExposure)}}</div>
+            <div class="text-[10px] text-red-600">ยังไม่ได้ล๊อก</div>
+          </div>
+          <div class="rounded-lg p-3 border-l-4 min-w-[180px]" :class="totalGainLossLocked>=0?'bg-emerald-50 border-emerald-500':'bg-red-50 border-red-500'">
+            <div class="text-xs" :class="totalGainLossLocked>=0?'text-emerald-700':'text-red-700'">{{totalGainLossLocked>=0?'💎 กำไร FX (Locked)':'⚠ ขาดทุน FX (Locked)'}}</div>
+            <div class="text-xl font-bold" :class="totalGainLossLocked>=0?'text-emerald-700':'text-red-700'">{{totalGainLossLocked>=0?'+':''}}฿{{fmt(totalGainLossLocked)}}</div>
+            <div class="text-[10px]" :class="totalGainLossLocked>=0?'text-emerald-600':'text-red-600'">(locked − market) × USD</div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="flex justify-between mb-4"><h3 class="text-sm text-slate-500 self-center">FX Rate History</h3><button @click="open()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">+ เพิ่ม FX Rate</button></div>
-    <div class="bg-white rounded-xl shadow overflow-x-auto">
-      <table class="w-full text-sm table-zebra">
-        <thead class="bg-slate-100"><tr><th class="p-2 text-left">วันที่</th><th class="p-2 text-left">From</th><th class="p-2 text-left">To</th><th class="p-2 text-left">Rate Type</th><th class="p-2 text-right">Rate</th><th class="p-2 text-left">Source</th><th></th></tr></thead>
-        <tbody>
-          <tr v-for="r in list" :key="r.id" class="border-t">
-            <td class="p-2">{{r.date}}</td>
-            <td class="p-2 font-medium">{{r.fromCurrency}}</td>
-            <td class="p-2 font-medium">{{r.toCurrency}}</td>
-            <td class="p-2 text-xs">{{r.rateType}}</td>
-            <td class="p-2 text-right font-bold">{{fmt(r.rate)}}</td>
-            <td class="p-2 text-xs">{{r.source||'-'}}</td>
-            <td class="p-2 text-right"><button @click="remove(r)" class="text-red-600 text-xs hover:underline">ลบ</button></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div v-if="showForm" class="fixed inset-0 z-50 modal-backdrop p-4">
-      <div class="bg-white rounded-xl shadow-2xl max-w-lg mx-auto my-12">
-        <div class="px-5 py-3 border-b flex justify-between"><h3 class="font-semibold">เพิ่ม FX Rate</h3><button @click="showForm=false" class="text-2xl text-slate-400">&times;</button></div>
-        <div class="p-5 space-y-3 text-sm">
-          <div><label class="block text-xs mb-1">วันที่</label><input type="date" v-model="form.date" class="w-full px-2 py-1.5 border rounded"></div>
-          <div class="grid grid-cols-2 gap-3">
-            <div><label class="block text-xs mb-1">From Currency</label><select v-model="form.fromCurrency" class="w-full px-2 py-1.5 border rounded"><option v-for="c in db.currencies" :value="c.code">{{c.code}}</option></select></div>
-            <div><label class="block text-xs mb-1">To Currency</label><select v-model="form.toCurrency" class="w-full px-2 py-1.5 border rounded"><option v-for="c in db.currencies" :value="c.code">{{c.code}}</option></select></div>
-          </div>
-          <div><label class="block text-xs mb-1">Rate Type</label><select v-model="form.rateType" class="w-full px-2 py-1.5 border rounded"><option>Bank Buying Rate</option><option>Bank Selling Rate</option><option>BOT Rate</option><option>Contract Rate</option><option>FCD Rate</option><option>Manual Rate</option><option>Forward Rate</option></select></div>
-          <div><label class="block text-xs mb-1">Rate *</label><input type="number" step="0.0001" v-model.number="form.rate" class="w-full px-2 py-1.5 border rounded text-right font-bold"></div>
-          <div><label class="block text-xs mb-1">Source</label><input v-model="form.source" class="w-full px-2 py-1.5 border rounded"></div>
+
+    <!-- 🆕 V19: Sensitivity — Export side (USD ขึ้น = ได้ THB เพิ่ม, USD ลง = เสีย) -->
+    <div class="bg-white rounded-xl shadow p-4">
+      <h3 class="font-bold text-slate-700 mb-3">📊 Sensitivity — ถ้า USD ขึ้น/ลง กระทบเท่าไหร่ (Exposure \${{fmt(usdExposure)}})</h3>
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div class="bg-red-100 rounded-lg p-3 border border-red-500">
+          <div class="text-xs text-red-800">🚨 USD -1.00</div>
+          <div class="text-lg font-bold text-red-800">−฿{{fmt(Math.abs(sensitivity.minus100))}}</div>
+          <div class="text-[10px] text-red-700">worst case</div>
         </div>
-        <div class="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2"><button @click="showForm=false" class="px-4 py-2 text-sm">ยกเลิก</button><button @click="save" class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">บันทึก</button></div>
+        <div class="bg-red-50 rounded-lg p-3 border border-red-400">
+          <div class="text-xs text-red-700">📉 USD -0.50</div>
+          <div class="text-lg font-bold text-red-700">−฿{{fmt(Math.abs(sensitivity.minus050))}}</div>
+          <div class="text-[10px] text-red-600">เสีย THB</div>
+        </div>
+        <div class="bg-red-50 rounded-lg p-3 border border-red-300">
+          <div class="text-xs text-red-700">📉 USD -0.10</div>
+          <div class="text-lg font-bold text-red-700">−฿{{fmt(Math.abs(sensitivity.minus010))}}</div>
+          <div class="text-[10px] text-red-600">เสีย THB</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-300">
+          <div class="text-xs text-emerald-700">📈 USD +0.10</div>
+          <div class="text-lg font-bold text-emerald-700">+฿{{fmt(sensitivity.plus010)}}</div>
+          <div class="text-[10px] text-emerald-600">ได้ THB เพิ่ม</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-400">
+          <div class="text-xs text-emerald-700">📈 USD +0.50</div>
+          <div class="text-lg font-bold text-emerald-700">+฿{{fmt(sensitivity.plus050)}}</div>
+          <div class="text-[10px] text-emerald-600">ได้ THB เพิ่ม</div>
+        </div>
+        <div class="bg-emerald-100 rounded-lg p-3 border border-emerald-500">
+          <div class="text-xs text-emerald-800">🎯 USD +1.00</div>
+          <div class="text-lg font-bold text-emerald-800">+฿{{fmt(sensitivity.plus100)}}</div>
+          <div class="text-[10px] text-emerald-700">best case</div>
+        </div>
+      </div>
+      <div class="text-[10px] text-slate-500 italic mt-2">💡 Export = เรารับ USD · USD แข็งค่า (เพิ่ม) → เราได้ THB เพิ่ม · USD อ่อนค่า (ลด) → เราเสีย THB</div>
+    </div>
+
+    <!-- Hedge Calculator -->
+    <div class="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-300 rounded-xl shadow p-4">
+      <h3 class="font-bold text-purple-900 mb-3">🎯 Hedge Calculator — วันนี้ควรล๊อกเรทตอนไหน?</h3>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-slate-600">USD ที่จะรับ/จ่าย</label>
+          <input type="number" step="0.01" v-model.number="hedgeCalc.usdAmount" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 50000">
+        </div>
+        <div>
+          <label class="text-xs text-slate-600">เรทตอนนี้</label>
+          <input type="number" step="0.0001" v-model.number="hedgeCalc.currentRate" class="w-full px-2 py-1.5 border rounded text-right font-bold">
+        </div>
+        <div>
+          <label class="text-xs text-slate-600">เรทเป้าหมาย (Target)</label>
+          <input type="number" step="0.0001" v-model.number="hedgeCalc.targetRate" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-amber-50" placeholder="เช่น 35.50">
+        </div>
+        <div>
+          <label class="text-xs text-slate-600">Daily Adjustment</label>
+          <input type="number" step="0.0001" v-model.number="hedgeCalc.dailyAdjustment" class="w-full px-2 py-1.5 border rounded text-right">
+        </div>
+      </div>
+      <div v-if="hedgeCalcResult" class="bg-white rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div>
+          <div class="text-xs text-slate-500">วันที่ถึง target</div>
+          <div class="font-bold" :class="hedgeCalcResult.daysToTarget>0?'text-emerald-700':'text-red-600'">
+            <template v-if="hedgeCalcResult.daysToTarget>0">+{{hedgeCalcResult.daysToTarget}} วัน ({{hedgeCalcResult.targetDate}})</template>
+            <template v-else-if="hedgeCalcResult.daysToTarget<0">⚠ ไม่ถึงเป้า (rate ไปทางตรงข้าม)</template>
+            <template v-else>ถึงแล้ว</template>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">มูลค่าตอนนี้</div>
+          <div class="font-bold text-blue-700">฿{{fmt(hedgeCalcResult.valueNowThb)}}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">มูลค่าที่ target</div>
+          <div class="font-bold text-purple-700">฿{{fmt(hedgeCalcResult.valueAtTargetThb)}}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">ส่วนต่าง</div>
+          <div class="font-bold" :class="hedgeCalcResult.diff>=0?'text-emerald-700':'text-red-600'">
+            ฿{{fmt(hedgeCalcResult.diff)}}
+            <span class="text-[10px]">({{hedgeCalcResult.pctDiff.toFixed(2)}}%)</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="hedgeCalcResult && hedgeCalcResult.usd > 0" class="mt-3 flex justify-end">
+        <button @click="applyHedgeRateAsContract" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-bold">🔒 ล๊อกเป็น FX Contract ทันที</button>
+      </div>
+    </div>
+
+    <!-- FX Contracts list -->
+    <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="px-4 py-3 bg-blue-50 border-b flex items-center justify-between">
+        <h3 class="font-bold text-blue-900">🔒 FX Contracts — Locked rates with daily adjustment ({{contractList.length}})</h3>
+        <button @click="openContract()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-bold">+ เพิ่มสัญญา</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left">เลขสัญญา</th>
+              <th class="p-2 text-left">คู่สัญญา</th>
+              <th class="p-2 text-left">Signed</th>
+              <th class="p-2 text-left">Due</th>
+              <th class="p-2 text-right">USD</th>
+              <th class="p-2 text-right bg-emerald-50">Locked Rate</th>
+              <th class="p-2 text-right bg-amber-50">Daily Adj</th>
+              <th class="p-2 text-center">วันผ่าน</th>
+              <th class="p-2 text-right bg-blue-50">Adjusted ตอนนี้</th>
+              <th class="p-2 text-right">Adjusted @ Due</th>
+              <th class="p-2 text-right">มูลค่า @ Due (THB)</th>
+              <th class="p-2 text-right bg-purple-50">กำไร/ขาดทุน vs Market<br><span class="text-[10px] font-normal text-slate-400">(locked − current) × USD</span></th>
+              <th class="p-2 text-center">สถานะ</th>
+              <th class="p-2 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!contractList.length"><td colspan="14" class="p-8 text-center text-slate-400 text-sm">ยังไม่มี FX Contract — กด "+ เพิ่มสัญญา" หรือล๊อกจาก Hedge Calculator</td></tr>
+            <tr v-for="c in contractList" :key="c.id" class="border-t hover:bg-blue-50/30" :class="c.status!=='active'?'opacity-50':''">
+              <td class="p-2 font-mono font-bold">{{c.contractNo}}</td>
+              <td class="p-2 text-xs">{{c.counterparty||'-'}}</td>
+              <td class="p-2 font-mono text-xs">{{c.signedDate}}</td>
+              <td class="p-2 font-mono text-xs">
+                {{c.dueDate}}
+                <div v-if="c.status==='active'" class="text-[10px]" :class="c.daysUntilDue<0?'text-red-600':c.daysUntilDue<=7?'text-amber-600':'text-slate-400'">
+                  <template v-if="c.daysUntilDue<0">เลย {{Math.abs(c.daysUntilDue)}} วัน</template>
+                  <template v-else>+{{c.daysUntilDue}} วัน</template>
+                </div>
+              </td>
+              <td class="p-2 text-right font-bold">\${{fmt(c.amount)}}</td>
+              <td class="p-2 text-right bg-emerald-50 font-bold text-emerald-700">{{fmt(c.lockedRate)}}</td>
+              <td class="p-2 text-right bg-amber-50 text-xs">{{c.dailyAdjustment>=0?'+':''}}{{c.dailyAdjustment}}</td>
+              <td class="p-2 text-center text-xs">{{c.daysSinceSigned}}</td>
+              <td class="p-2 text-right bg-blue-50 font-bold text-blue-700">{{fmt(c.adjustedRateNow)}}</td>
+              <td class="p-2 text-right font-bold">{{fmt(c.adjustedRateAtDue)}}</td>
+              <td class="p-2 text-right">฿{{fmt(c.totalThbAtDue)}}</td>
+              <td class="p-2 text-right bg-purple-50 font-bold" :class="c.gainLossVsCurrent>=0?'text-emerald-700':'text-red-600'">
+                {{c.gainLossVsCurrent>=0?'+':''}}฿{{fmt(c.gainLossVsCurrent)}}
+                <div class="text-[10px] font-normal" :class="c.gainLossVsCurrent>=0?'text-emerald-600':'text-red-600'">{{c.gainLossVsCurrent>=0?'กำไร':'ขาดทุน'}}</div>
+              </td>
+              <td class="p-2 text-center">
+                <span v-if="c.status==='active'" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">✓ Active</span>
+                <span v-else-if="c.status==='closed'" class="px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-[10px] font-bold">🔒 Closed</span>
+                <span v-else class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold">⊘ Cancelled</span>
+              </td>
+              <td class="p-2 text-center">
+                <div class="flex gap-1 justify-center">
+                  <button v-if="c.status==='active'" @click="openContract(c)" class="text-blue-600 text-xs hover:underline">แก้</button>
+                  <button v-if="c.status==='active'" @click="closeContract(c)" class="text-emerald-600 text-xs hover:underline">ปิด</button>
+                  <button @click="removeContract(c)" class="text-red-500 text-xs hover:underline">ลบ</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-4 py-2 text-[10px] text-slate-500 italic border-t bg-slate-50">
+        💡 <b>Adjusted Rate</b> = Locked Rate + (Daily Adj × วันที่ผ่าน) · <b>กำไร/ขาดทุน vs Market</b> = (Adjusted ตอนนี้ − USD/THB ตลาดตอนนี้) × USD
+        — ฝั่ง Export: locked สูงกว่าตลาด = กำไร · locked ต่ำกว่าตลาด = ขาดทุน
+      </div>
+    </div>
+
+    <!-- 🆕 V19: USD Receivables list — บิลขายต่างประเทศที่ค้างรับเงิน -->
+    <div v-if="usdReceivables.length" class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="px-4 py-3 bg-amber-50 border-b">
+        <h3 class="font-bold text-amber-900">💵 USD ที่จะรับ — บิลขายต่างประเทศที่ลูกค้ายังไม่ชำระ</h3>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left">บิลขาย</th>
+              <th class="p-2 text-left">ลูกค้า</th>
+              <th class="p-2 text-left">วันที่</th>
+              <th class="p-2 text-right">USD ค้างรับ</th>
+              <th class="p-2 text-right">Rate บิล</th>
+              <th class="p-2 text-right">THB @ market ตอนนี้</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in usdReceivables" :key="p.docNo" class="border-t">
+              <td class="p-2 font-mono">{{p.docNo}}</td>
+              <td class="p-2">{{p.customer}}</td>
+              <td class="p-2 font-mono text-xs">{{p.dueDate}}</td>
+              <td class="p-2 text-right font-bold text-amber-700">\${{fmt(p.usdAmount)}}</td>
+              <td class="p-2 text-right text-slate-500">{{fmt(p.billFxRate)}}</td>
+              <td class="p-2 text-right text-emerald-700">฿{{fmt(p.usdAmount * currentRate)}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Contract Form Modal -->
+    <div v-if="showContractForm" class="fixed inset-0 z-50 modal-backdrop p-4 overflow-y-auto" style="background:rgba(0,0,0,0.5)">
+      <div class="bg-white rounded-xl shadow-2xl max-w-xl mx-auto my-12">
+        <div class="px-5 py-3 border-b bg-gradient-to-r from-blue-600 to-cyan-700 text-white flex justify-between">
+          <h3 class="font-semibold">🔒 {{editingContractId?'แก้ไข':'เพิ่ม'}} FX Contract</h3>
+          <button @click="showContractForm=false" class="text-white text-2xl hover:opacity-80">&times;</button>
+        </div>
+        <div class="p-5 space-y-3 text-sm">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold text-slate-600">เลขสัญญา *</label>
+              <input v-model="contractForm.contractNo" class="w-full px-2 py-1.5 border rounded font-mono">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">คู่สัญญา (Bank/Counterparty)</label>
+              <input v-model="contractForm.counterparty" class="w-full px-2 py-1.5 border rounded" placeholder="เช่น KBank · BBL">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">วันที่ล๊อก (Signed) *</label>
+              <input type="date" v-model="contractForm.signedDate" class="w-full px-2 py-1.5 border rounded">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">Due Date *</label>
+              <input type="date" v-model="contractForm.dueDate" class="w-full px-2 py-1.5 border rounded">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">จำนวน USD *</label>
+              <input type="number" step="0.01" v-model.number="contractForm.amount" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 50000">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">Locked Rate (THB/USD) *</label>
+              <input type="number" step="0.0001" v-model.number="contractForm.lockedRate" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-emerald-50" placeholder="เช่น 35.85">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">Daily Adjustment (Premium/Discount)</label>
+              <input type="number" step="0.0001" v-model.number="contractForm.dailyAdjustment" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-amber-50" placeholder="เช่น -0.0022">
+              <div class="text-[10px] text-slate-500 mt-0.5">+ = premium (rate ขึ้นทุกวัน) · - = discount (rate ลงทุกวัน)</div>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">สถานะ</label>
+              <select v-model="contractForm.status" class="w-full px-2 py-1.5 border rounded">
+                <option value="active">✓ Active</option>
+                <option value="closed">🔒 Closed</option>
+                <option value="cancelled">⊘ Cancelled</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs font-bold text-slate-600">หมายเหตุ</label>
+            <textarea v-model="contractForm.notes" rows="2" class="w-full px-2 py-1.5 border rounded" placeholder="รายละเอียดสัญญา / Counterparty / Reference"></textarea>
+          </div>
+          <!-- Preview -->
+          <div v-if="contractForm.signedDate && contractForm.dueDate && contractForm.lockedRate" class="bg-blue-50 border border-blue-300 rounded p-3 text-xs">
+            <div class="font-bold text-blue-900 mb-1">📊 Preview:</div>
+            <div>Adjusted Rate วันนี้: <b>{{fmt(computeAdjustedRate(contractForm, erp.today()))}}</b></div>
+            <div>Adjusted Rate @ Due ({{contractForm.dueDate}}): <b>{{fmt(computeAdjustedRate(contractForm, contractForm.dueDate))}}</b></div>
+            <div>มูลค่า THB @ Due: <b>฿{{fmt(Number(contractForm.amount||0) * computeAdjustedRate(contractForm, contractForm.dueDate))}}</b></div>
+          </div>
+        </div>
+        <div class="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2">
+          <button @click="showContractForm=false" class="px-4 py-2 text-sm">ยกเลิก</button>
+          <button @click="saveContract" class="px-5 py-2 bg-blue-600 text-white rounded font-bold text-sm">บันทึก Contract</button>
+        </div>
       </div>
     </div>
   </div>`
@@ -28239,6 +28790,8 @@ app.component('view-pendingSales', {
       return _trkSafe(db.salesPlans).filter(p => {
         if (!p) return false;
         if (p.month !== planMonth.value) return false;
+        /* 🆕 V18 (2026-05-24): ถ้าเปิด PO ขายจากแผนนี้แล้ว — ซ่อนออก (เหลือแค่ที่รอ lock/รอออก PO) */
+        if (p.poSellId) return false;
         if (planFilterChannel.value && (p.channel||'') !== planFilterChannel.value) return false;
         if (planFilterGroup.value) {
           const prod = _trkSafe(db.products).find(x => x && x.id === p.productId);
@@ -28255,12 +28808,17 @@ app.component('view-pendingSales', {
         const cust = _trkSafe(db.customers).find(x => x && x.id === p.customerId);
         const metalGroup = prod?.metalGroup || '';
         const isLocked = p.status === 'locked';
-        const lme = isLocked ? Number(p.lockedLme||0) : lmeBaseSP(metalGroup);
+        /* 🆕 V18: ใช้ cfLme (ราคา LME ที่ broker confirm มาแล้ว) ถ้ากรอกไว้, ไม่งั้นใช้ market */
+        const cfLme = Number(p.cfLme||0);
+        const lme = isLocked
+          ? Number(p.lockedLme||0)
+          : (cfLme > 0 ? cfLme : lmeBaseSP(metalGroup));
         const fx = isLocked ? Number(p.lockedFx||0) : Number(db.lmeConfig.fxRate||0);
         const sellPctLme = Number(p.sellPctLme||0);
         const totalKg = Number(p.containers||0) * Number(p.kgPerContainer||db.lmeConfig.kgPerContainer||25000);
         const sellPrice = lme > 0 && fx > 0 && sellPctLme > 0 ? (lme/1000) * fx * sellPctLme/100 : 0;
         return { p, id: p.id, prod, cust, metalGroup, lme, fx, totalKg, sellPrice, isLocked,
+          cfLme, lmeIsManual: cfLme > 0,
           containers: Number(p.containers||0), sellPctLme,
           productName: prod?.name || '-', productCode: prod?.code || '-',
           customerName: cust?.name || '-',
@@ -28284,7 +28842,9 @@ app.component('view-pendingSales', {
         month: planMonth.value, productId: '', customerId: '',
         channel: 'export', containers: 1,
         kgPerContainer: db.lmeConfig.kgPerContainer || 25000,
-        sellPctLme: 0, lockedLme: 0, lockedFx: 0,
+        sellPctLme: 0,
+        cfLme: 0,        /* 🆕 V18: ราคา LME ที่ broker cf (กรอกเอง) — ใช้แทน market ถ้า > 0 */
+        lockedLme: 0, lockedFx: 0,
         notes: '', status: 'pending', createdAt: new Date().toISOString(),
       });
       planSave();
@@ -28305,7 +28865,8 @@ app.component('view-pendingSales', {
         const prod = _trkSafe(db.products).find(x => x && x.id === target.productId);
         if (!prod) { alert('เลือกสินค้าก่อนล็อก'); return; }
         if (Number(target.sellPctLme||0) <= 0) { alert('กรอก % LME ก่อนล็อก'); return; }
-        if (Number(target.lockedLme||0) <= 0) target.lockedLme = lmeBaseSP(prod.metalGroup);
+        /* 🆕 V18: ถ้ามี cfLme ที่ broker confirm ใช้ค่านั้นเป็น lockedLme */
+        if (Number(target.lockedLme||0) <= 0) target.lockedLme = Number(target.cfLme||0) > 0 ? Number(target.cfLme) : lmeBaseSP(prod.metalGroup);
         if (Number(target.lockedFx||0) <= 0) target.lockedFx = Number(db.lmeConfig.fxRate||0);
         target.status = 'locked'; target.lockedAt = new Date().toISOString();
         planSave();
@@ -28313,13 +28874,13 @@ app.component('view-pendingSales', {
         erp.showToast('🔒 ล็อกที่ '+erp.fmt(price)+' ฿/กก.','success');
       }
     }
-    /* 🆕 V12 (2026-05-24): QUICK BOOK PO SELL — สร้าง PO Sell จากหน้านี้ ใส่ LME locked + USD price */
+    /* 🆕 V12+V16 (2026-05-24): QUICK BOOK PO SELL — ใส่ LME + % LME (ไม่ใช่ USD/kg แล้ว) */
     const showQuickBook = ref(false);
     const quickBook = reactive({
       customerId: '', productId: '', qty: 0, deliveryDate: '',
       lockedLmeUsd: 0,       // ราคา LME ที่ล๊อก (USD/MT)
       lockedFx: 0,           // เรท USD/THB ที่ล๊อก ณ วันที่ล๊อก
-      sellPriceUsd: 0,       // ราคาขาย (USD/kg)
+      sellPctLme: 0,         // 🆕 V16: % LME ที่ขายให้ลูกค้า (แทน sellPriceUsd)
       channel: 'export',
       note: '',
     });
@@ -28328,32 +28889,79 @@ app.component('view-pendingSales', {
         customerId: '', productId: '', qty: 0, deliveryDate: '',
         lockedLmeUsd: 0,
         lockedFx: Number(db.lmeConfig.fxRate||0),
-        sellPriceUsd: 0,
+        sellPctLme: 0,
         channel: 'export', note: '',
       });
       showQuickBook.value = true;
     }
-    /* คำนวณราคา THB/kg = USD/kg × FX (live) */
+    /* 🆕 V16: คำนวณราคา = (LME/1000) × FX × %LME/100 */
     const quickBookCalc = computed(() => {
-      const usd = Number(quickBook.sellPriceUsd||0);
+      const lme = Number(quickBook.lockedLmeUsd||0);
       const fx = Number(quickBook.lockedFx||0);
+      const pct = Number(quickBook.sellPctLme||0);
       const qty = Number(quickBook.qty||0);
-      const thbPerKg = usd > 0 && fx > 0 ? usd * fx : 0;
+      const sellPriceUsdPerKg = lme > 0 && pct > 0 ? (lme/1000) * pct/100 : 0;
+      const thbPerKg = sellPriceUsdPerKg > 0 && fx > 0 ? sellPriceUsdPerKg * fx : 0;
       const totalRevenueThb = qty * thbPerKg;
-      const totalRevenueUsd = qty * usd;
-      // % LME ที่เทียบจาก locked LME — ราคาขาย USD/kg เทียบ LME USD/MT
-      // sellPriceUsd (USD/kg) ÷ (lockedLmeUsd/1000) × 100
-      const pctLme = Number(quickBook.lockedLmeUsd||0) > 0 && usd > 0
-        ? usd / (Number(quickBook.lockedLmeUsd)/1000) * 100 : 0;
-      return { thbPerKg, totalRevenueThb, totalRevenueUsd, pctLme };
+      const totalRevenueUsd = qty * sellPriceUsdPerKg;
+      return { thbPerKg, totalRevenueThb, totalRevenueUsd, pctLme: pct, sellPriceUsdPerKg };
     });
+    /* 🆕 V16: column hide toggle for pending sale table */
+    const hideProposalCols = ref(false);
+    function toggleProposalCols() { hideProposalCols.value = !hideProposalCols.value; }
+
+    /* 🆕 V16: สร้าง PO Sell จาก Sales Plan (เมื่อ locked) */
+    async function createPoFromPlan(p) {
+      try {
+        if (!p.productId) { alert('แผนนี้ยังไม่ได้เลือกสินค้า'); return; }
+        if (!p.customerId) { alert('แผนนี้ยังไม่ได้เลือกลูกค้า'); return; }
+        if (p.status !== 'locked') { alert('Lock ราคาก่อน แล้วจึงเปิด PO ขายได้'); return; }
+        // ถ้า PO Sell อ้างถึง plan นี้แล้ว ห้ามสร้างซ้ำ
+        const existing = (db.poSells||[]).find(po => po && po.sourcePlanId === p.id);
+        if (existing) { alert('PO Sell ของแผนนี้สร้างไว้แล้ว: '+existing.docNo); return; }
+        const kg = Number(p.containers||0) * Number(p.kgPerContainer||db.lmeConfig.kgPerContainer||25000);
+        if (kg <= 0) { alert('จำนวน กก. เป็น 0'); return; }
+        const lme = Number(p.lockedLme||0); const fx = Number(p.lockedFx||0); const pct = Number(p.sellPctLme||0);
+        const pricePerKg = (lme/1000) * fx * pct/100;
+        if (pricePerKg <= 0) { alert('ราคาคำนวณ = 0'); return; }
+        if (!confirm(`เปิด PO ขายจากแผนนี้?\n\nสินค้า: ${erp.productName(p.productId)}\nลูกค้า: ${erp.customerName(p.customerId)}\nจำนวน: ${kg.toLocaleString('th-TH')} กก. (${p.containers} ตู้)\n%LME: ${pct}%\nราคา: ${pricePerKg.toFixed(2)} ฿/กก.\nรวม: ${(kg*pricePerKg).toLocaleString('th-TH')} ฿`)) return;
+        const docNo = erp.nextDocNo ? erp.nextDocNo('POS') : 'POS-Q-'+Date.now();
+        const newPO = {
+          id: erp.uid ? erp.uid('POS') : 'POS-'+Date.now()+Math.random().toString(36).slice(2,5),
+          docNo, date: erp.today(),
+          customerId: p.customerId, productId: p.productId,
+          branchId: '', channelId: '', channel: p.channel || 'export',
+          items: [{ id: 'PSI-'+Date.now(), productId: p.productId, qty: kg, unitPrice: pricePerKg, totalRevenue: kg*pricePerKg }],
+          qty: kg, unitPrice: pricePerKg, totalRevenue: kg*pricePerKg,
+          deliveryDate: '', status: 'Open',
+          note: 'จาก Sales Plan: '+(p.notes||''),
+          lockedLmeUsd: lme, lockedFxAtBooking: fx, sellPctLme: pct,
+          sourcePlanId: p.id,
+          bookingMode: 'FROM_SALES_PLAN',
+          createdBy: erp.currentUser.value?.username||'-', createdAt: new Date().toISOString(),
+        };
+        if (!Array.isArray(db.poSells)) db.poSells = [];
+        db.poSells.push(newPO);
+        // mark plan as linked
+        p.poSellId = newPO.id;
+        p.poSellDocNo = docNo;
+        try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+        erp.logAudit && erp.logAudit('plan-to-po','poSell', null, newPO);
+        erp.showToast('✓ เปิด PO Sell '+docNo+' จากแผนแล้ว', 'success');
+        try { if (window.$autoSync && window.$autoSync.pushNow) await window.$autoSync.pushNow(); } catch(e){}
+      } catch(e) { console.error('createPoFromPlan:', e); alert('Error: '+e.message); }
+    }
+
     async function submitQuickBook() {
       if (!quickBook.customerId) { alert('เลือกลูกค้า'); return; }
       if (!quickBook.productId) { alert('เลือกสินค้า'); return; }
       if (Number(quickBook.qty||0) <= 0) { alert('ใส่จำนวน (กก.)'); return; }
-      if (Number(quickBook.sellPriceUsd||0) <= 0) { alert('ใส่ราคาขาย USD/kg'); return; }
+      if (Number(quickBook.sellPctLme||0) <= 0) { alert('ใส่ % LME'); return; }
       if (Number(quickBook.lockedFx||0) <= 0) { alert('ใส่เรท FX (USD/THB)'); return; }
+      if (Number(quickBook.lockedLmeUsd||0) <= 0) { alert('ใส่ราคา LME (USD/MT)'); return; }
       const calc = quickBookCalc.value;
+      // sync sellPriceUsd for backward compat
+      quickBook.sellPriceUsd = calc.sellPriceUsdPerKg;
       const docNo = erp.nextDocNo ? erp.nextDocNo('POS') : 'POS-Q-'+Date.now();
       const newPO = {
         id: erp.uid ? erp.uid('POS') : 'POS-'+Date.now()+Math.random().toString(36).slice(2,5),
@@ -28423,16 +29031,19 @@ app.component('view-pendingSales', {
     }
     /* enrichedPendingSale — ใส่ bestPlanPrice + comparison vs Cost Pool avg cost */
     const pendingSaleEnriched = computed(() => {
-      return pendingSaleTable.value.map(r => {
-        const best = bestPlanPriceFor(r.productId);
-        // ราคาต้นทุน Cost Pool (avg) — ใช้ pool avg ของสินค้านี้
-        const poolUnitCost = r.avgPrice || (r.stockWAC || 0);
-        const margin = best.price > 0 ? (best.price - poolUnitCost) * r.pendingSaleQty : 0;
-        const marginPct = best.price > 0 && poolUnitCost > 0 ? ((best.price - poolUnitCost)/poolUnitCost)*100 : 0;
-        return { ...r,
-          bestPrice: best.price, bestPct: best.pct, bestCustomer: best.customer, bestIsLocked: best.isLocked,
-          poolUnitCost, margin, marginPct };
-      });
+      return pendingSaleTable.value
+        /* 🆕 V18 (2026-05-24): ซ่อนแถวที่ไม่มี pendingSaleQty (ของใน pool หมดแล้ว) — กันการแสดง "ต้นทุน Pool" โดยไม่มีของ */
+        .filter(r => Number(r.pendingSaleQty||0) > 0.01)
+        .map(r => {
+          const best = bestPlanPriceFor(r.productId);
+          // ราคาต้นทุน Cost Pool (avg) — ใช้ pool avg ของสินค้านี้
+          const poolUnitCost = r.avgPrice || (r.stockWAC || 0);
+          const margin = best.price > 0 ? (best.price - poolUnitCost) * r.pendingSaleQty : 0;
+          const marginPct = best.price > 0 && poolUnitCost > 0 ? ((best.price - poolUnitCost)/poolUnitCost)*100 : 0;
+          return { ...r,
+            bestPrice: best.price, bestPct: best.pct, bestCustomer: best.customer, bestIsLocked: best.isLocked,
+            poolUnitCost, margin, marginPct };
+        });
     });
 
     function exportCsv() {
@@ -28688,7 +29299,9 @@ app.component('view-pendingSales', {
       // 🆕 V11: Pending sales + best price proposal
       pendingSaleEnriched, bestPlanPriceFor,
       // 🆕 V12 (2026-05-24): Quick Book PO Sell
-      showQuickBook, quickBook, quickBookCalc, openQuickBook, submitQuickBook };
+      showQuickBook, quickBook, quickBookCalc, openQuickBook, submitQuickBook,
+      // 🆕 V16: column hide toggle + create PO from plan
+      hideProposalCols, toggleProposalCols, createPoFromPlan };
   },
   template: `
   <div class="space-y-3">
@@ -28794,17 +29407,17 @@ app.component('view-pendingSales', {
             <div></div>
           </div>
 
-          <!-- LME + FX block -->
+          <!-- 🆕 V16: LME + % + FX block -->
           <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
             <div class="text-xs font-bold text-amber-800">📊 LME Locked Pricing (กรอกมือ ณ วันที่ล๊อก)</div>
             <div class="grid grid-cols-3 gap-3">
               <div>
-                <label class="text-xs text-slate-600">LME ที่ล๊อก (USD/MT)</label>
+                <label class="text-xs text-slate-600">LME ที่ล๊อก (USD/MT) *</label>
                 <input type="number" step="0.01" v-model.number="quickBook.lockedLmeUsd" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 9500">
               </div>
               <div>
-                <label class="text-xs text-slate-600">ราคาขาย (USD/kg) *</label>
-                <input type="number" step="0.0001" v-model.number="quickBook.sellPriceUsd" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-amber-50" placeholder="เช่น 8.5">
+                <label class="text-xs text-slate-600">% LME *</label>
+                <input type="number" step="0.01" v-model.number="quickBook.sellPctLme" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-amber-50" placeholder="เช่น 95">
               </div>
               <div>
                 <label class="text-xs text-slate-600">FX (USD/THB) *</label>
@@ -28813,12 +29426,8 @@ app.component('view-pendingSales', {
             </div>
           </div>
 
-          <!-- Calc preview -->
-          <div class="bg-emerald-50 border border-emerald-300 rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <div class="text-xs text-slate-600">% LME (คำนวณ)</div>
-              <div class="text-lg font-bold text-amber-700">{{quickBookCalc.pctLme.toFixed(2)}}%</div>
-            </div>
+          <!-- Calc preview — V16: ลบ % LME (คำนวณ) ออก เพราะเป็น input แล้ว -->
+          <div class="bg-emerald-50 border border-emerald-300 rounded-lg p-3 grid grid-cols-3 gap-3">
             <div>
               <div class="text-xs text-slate-600">ราคา THB/kg</div>
               <div class="text-lg font-bold text-blue-700">{{fmt(quickBookCalc.thbPerKg)}}</div>
@@ -28851,8 +29460,8 @@ app.component('view-pendingSales', {
     <div class="bg-white rounded-xl shadow">
       <div class="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center flex-wrap gap-2">
         <div>
-          <h3 class="font-bold text-amber-900">📋 วางแผนการขาย (Sales Plan) — ทองแดง / ทองเหลือง</h3>
-          <p class="text-xs text-amber-700">เสนอ % LME + ช่องทาง → 🔒 Lock เพื่อยืนยันราคา · <b>เพิ่มแค่ที่มี order/ลูกค้าเสนอ %</b> (ไม่ต้องกรอกทุกสินค้า)</p>
+          <h3 class="font-bold text-amber-900">📋 วางแผนการขาย (Sales Plan) — Seller Option · ทองแดง / ทองเหลือง</h3>
+          <p class="text-xs text-amber-700">ลูกค้าเสนอ % LME มา · เรารอ lock spot LME ตาม % นั้น (seller option) · <b>กรอก LME cf</b> ถ้า broker confirm ราคามาแล้ว · 🔒 Lock เพื่อยืนยัน · เปิด PO ขาย → แผนจะหายจากหน้านี้</p>
         </div>
         <button @click="planAdd" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ เพิ่มแผน</button>
       </div>
@@ -28878,15 +29487,16 @@ app.component('view-pendingSales', {
             <tr>
               <th class="p-2 text-left min-w-[180px]">สินค้า</th>
               <th class="p-2 text-center w-28">ช่องทาง</th>
-              <th class="p-2 text-left min-w-[150px]">ลูกค้า</th>
+              <th class="p-2 text-left min-w-[180px]">ลูกค้า</th>
               <th class="p-2 text-right w-20">ตู้</th>
               <th class="p-2 text-right w-24">กก./ตู้</th>
               <th class="p-2 text-right w-28">รวม กก.</th>
               <th class="p-2 text-right w-20 bg-amber-50">% LME</th>
-              <th class="p-2 text-right w-24">LME (USD/MT)</th>
-              <th class="p-2 text-right w-20">FX</th>
+              <!-- 🆕 V18: เพิ่มคอลัมน์ LME (cf) — กรอกเอง ถ้า broker cf ราคามาแล้ว -->
+              <th class="p-2 text-right w-24 bg-blue-50">LME cf<br><span class="text-[10px] font-normal text-slate-400">(USD/MT)</span></th>
               <th class="p-2 text-right w-28 bg-emerald-50">ราคา (THB/kg)</th>
-              <th class="p-2 text-center w-28">สถานะ</th>
+              <th class="p-2 text-center w-32">สถานะ</th>
+              <th class="p-2 text-center w-28">PO ขาย</th>
               <th class="w-8"></th>
             </tr>
           </thead>
@@ -28905,153 +29515,46 @@ app.component('view-pendingSales', {
                 </select>
               </td>
               <td class="p-1">
-                <select v-model="row.p.customerId" @change="planSave" class="w-full px-2 py-1 border rounded text-sm">
-                  <option value="">-เลือกลูกค้า-</option>
-                  <option v-for="c in db.customers.filter(x=>x && x.active!==false)" :key="c.id" :value="c.id">{{c.name}}</option>
-                </select>
+                <!-- 🆕 V16: ใช้ searchable-select สำหรับ customer -->
+                <searchable-select v-model="row.p.customerId" :options="db.customers.filter(x=>x && x.active!==false)" label-field="name" code-field="code" placeholder="🔍 พิมพ์ชื่อลูกค้า..." input-class="w-full px-2 py-1 border rounded text-sm" @change="planSave"></searchable-select>
               </td>
               <td class="p-1"><input type="number" step="0.1" v-model.number="row.p.containers" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right" :class="row.isLocked?'bg-slate-100':''"></td>
               <td class="p-1"><input type="number" v-model.number="row.p.kgPerContainer" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right text-xs" :class="row.isLocked?'bg-slate-100':''"></td>
               <td class="p-1 text-right font-medium">{{fmt(row.totalKg)}}</td>
               <td class="p-1"><input type="number" step="0.01" v-model.number="row.p.sellPctLme" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right bg-amber-50 font-bold" :class="row.isLocked?'opacity-70':''" placeholder="0"></td>
               <td class="p-1">
-                <input v-if="row.isLocked" type="number" v-model.number="row.p.lockedLme" @change="planSave" class="w-full px-1 py-1 border rounded text-right text-xs bg-emerald-50 font-bold">
-                <span v-else class="text-xs text-slate-500">{{fmt(row.lme)}}</span>
+                <!-- 🆕 V18: cf LME input — ถ้ามี ใช้แทน market · ถ้าว่าง = ใช้ market -->
+                <input type="number" step="0.01" v-model.number="row.p.cfLme" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right text-xs bg-blue-50 font-bold" :placeholder="'ตลาด '+fmt(lmeBaseSP(row.metalGroup))">
               </td>
-              <td class="p-1">
-                <input v-if="row.isLocked" type="number" step="0.01" v-model.number="row.p.lockedFx" @change="planSave" class="w-full px-1 py-1 border rounded text-right text-xs bg-emerald-50 font-bold">
-                <span v-else class="text-xs text-slate-500">{{fmt(row.fx)}}</span>
+              <td class="p-1 text-right font-bold bg-emerald-50 text-emerald-700">
+                {{row.sellPrice?fmt(row.sellPrice):'-'}}
+                <div v-if="row.lmeIsManual && !row.isLocked" class="text-[10px] font-normal text-blue-600">🔵 จาก cf</div>
               </td>
-              <td class="p-1 text-right font-bold bg-emerald-50 text-emerald-700">{{row.sellPrice?fmt(row.sellPrice):'-'}}</td>
               <td class="p-1 text-center">
                 <button @click="planLock(row.p)" :class="['px-2 py-1 rounded text-xs font-medium w-full', row.isLocked?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:bg-amber-200']">
                   {{row.isLocked?'🔒 Locked':'⏳ Pending'}}
                 </button>
               </td>
+              <td class="p-1 text-center">
+                <!-- 🆕 V16: ปุ่มเปิด PO ขายเมื่อ Locked แล้ว -->
+                <template v-if="row.isLocked">
+                  <span v-if="row.p.poSellDocNo" class="px-2 py-1 bg-purple-100 text-purple-700 rounded text-[10px] font-bold whitespace-nowrap">✓ {{row.p.poSellDocNo}}</span>
+                  <button v-else @click="createPoFromPlan(row.p)" class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-bold w-full whitespace-nowrap">+ เปิด PO ขาย</button>
+                </template>
+                <span v-else class="text-[10px] text-slate-400">รอ Lock</span>
+              </td>
               <td class="p-1 text-right"><button @click="planRemove(row.p)" class="text-red-500 px-2 hover:bg-red-50 rounded">×</button></td>
             </tr>
             <tr v-if="!planEnriched.length">
-              <td colspan="12" class="text-center py-6 text-slate-400 text-sm">ยังไม่มีแผนเดือนนี้ — กด <b>"+ เพิ่มแผน"</b> เพื่อใส่ order ที่ลูกค้าเสนอ %</td>
+              <td colspan="12" class="text-center py-6 text-slate-400 text-sm">ยังไม่มีแผนรอ Lock เดือนนี้ — กด <b>"+ เพิ่มแผน"</b> เพื่อใส่ order ที่ลูกค้าเสนอ %<br><span class="text-[10px]">💡 แผนที่เปิด PO ขายแล้วถูกซ่อนออก — ดู PO ที่เปิดในหน้า PO Sell</span></td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- VIEW MODE FILTER -->
-    <div class="bg-white rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
-      <div class="flex border rounded-lg overflow-hidden">
-        <button @click="viewMode='pending'; selectedProductId=''" :class="['px-4 py-2 text-sm font-medium', viewMode==='pending'?'bg-amber-600 text-white':'bg-white text-slate-600']">⏳ ยังรอขาย</button>
-        <button @click="viewMode='sold'; selectedProductId=''" :class="['px-4 py-2 text-sm font-medium border-l', viewMode==='sold'?'bg-emerald-600 text-white':'bg-white text-slate-600']">✅ ขายแล้ว</button>
-        <button @click="viewMode='all'; selectedProductId=''" :class="['px-4 py-2 text-sm font-medium border-l', viewMode==='all'?'bg-blue-600 text-white':'bg-white text-slate-600']">📋 ทั้งหมด</button>
-      </div>
-      <select v-model="filterCustomer" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุก Customer</option><option v-for="c in db.customers" :value="c.id">{{c.name}}</option></select>
-      <span class="flex-1"></span>
-      <button @click="exportCsv" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
-    </div>
-
-    <!-- Metal group filter -->
-    <div class="bg-white rounded-xl shadow p-3">
-      <div class="flex items-center justify-between mb-2">
-        <h4 class="text-sm font-semibold text-slate-700">📂 หมวดสินค้า ({{ selectedGroups.length === 0 ? 'แสดงทุกหมวด' : 'เลือก ' + selectedGroups.filter(g=>g!=='__NONE__').length + ' หมวด' }})</h4>
-        <div class="flex gap-2">
-          <button @click="selectAllGroups" type="button" class="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700">เลือกทั้งหมด</button>
-          <button @click="selectNoneGroups" type="button" class="text-xs px-2 py-1 rounded bg-slate-200 text-slate-600">ไม่เลือก</button>
-        </div>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <label v-for="g in allMetalGroups" :key="g"
-          :class="['flex items-center gap-2 px-3 py-1.5 border-2 rounded-lg text-xs cursor-pointer',
-            selectedGroups.includes(g) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-600']">
-          <input type="checkbox" :checked="selectedGroups.includes(g)" @change="toggleGroup(g)">
-          <span class="font-medium">{{ g || '(ไม่ระบุ)' }}</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Summary KPIs -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-      <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">รายการสินค้า</div><div class="text-xl font-bold text-blue-700">{{summaryTotals.productCount}}</div></div>
-      <div class="bg-amber-50 rounded-xl shadow p-3"><div class="text-xs text-amber-600">น้ำหนักรวม</div><div class="text-xl font-bold text-amber-700">{{fmt(summaryTotals.totalRemainQty)}} กก.</div></div>
-      <div class="bg-amber-50 rounded-xl shadow p-3"><div class="text-xs text-amber-600">มูลค่ารวม</div><div class="text-xl font-bold text-amber-700">{{fmt(summaryTotals.totalRemainValue)}}</div></div>
-      <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">ราคาเฉลี่ย</div><div class="text-xl font-bold">{{fmt(summaryTotals.avgRemainPrice)}}/กก.</div></div>
-      <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">กำไรรวม vs LME</div><div class="text-xl font-bold" :class="summaryTotals.totalGainVsLme>=0?'text-emerald-700':'text-red-600'">{{fmt(summaryTotals.totalGainVsLme)}}</div></div>
-    </div>
-
-    <!-- Summary by product (default view) -->
-    <div v-if="!selectedProductId" class="bg-white rounded-xl shadow overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="bg-slate-100"><tr>
-          <th class="p-2 text-left">สินค้า</th>
-          <th class="p-2 text-left">หมวด</th>
-          <th class="p-2 text-right">PO</th>
-          <th class="p-2 text-right">{{viewMode==='sold'?'ขายแล้ว':'รอขาย'}} (กก.)</th>
-          <th class="p-2 text-right">มูลค่า</th>
-          <th class="p-2 text-right">ราคาเฉลี่ย</th>
-          <th class="p-2 text-right">WAC</th>
-          <th class="p-2 text-right">LME Target</th>
-          <th class="p-2 text-right">vs WAC</th>
-          <th class="p-2 text-right">vs LME</th>
-          <th></th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="r in productSummary" :key="r.productId" class="border-t hover:bg-amber-50/30 cursor-pointer" @click="selectedProductId=r.productId">
-            <td class="p-2"><span class="font-mono text-xs text-slate-500">{{r.productCode}}</span> {{r.productName}}</td>
-            <td class="p-2 text-xs">{{r.metalGroup}}</td>
-            <td class="p-2 text-right">{{r.poCount}}</td>
-            <td class="p-2 text-right font-bold text-amber-700">{{fmt(viewMode==='sold'?r.soldQty:r.remainQty)}}</td>
-            <td class="p-2 text-right font-bold">{{fmt(viewMode==='sold'?r.soldValue:r.remainValue)}}</td>
-            <td class="p-2 text-right">{{fmt(r.avgPriceRemain)}}</td>
-            <td class="p-2 text-right text-slate-500">{{fmt(r.wac)}}</td>
-            <td class="p-2 text-right text-blue-700">{{r.lmeTarget?fmt(r.lmeTarget):'-'}}</td>
-            <td class="p-2 text-right text-xs" :class="r.diffPctWac>=0?'text-emerald-700':'text-red-600'">{{r.wac>0?r.diffPctWac.toFixed(2)+'%':'-'}}</td>
-            <td class="p-2 text-right text-xs" :class="r.diffPctLme>=0?'text-emerald-700':'text-red-600'">{{r.lmeTarget>0?r.diffPctLme.toFixed(2)+'%':'-'}}</td>
-            <td class="p-2 text-right"><span class="text-blue-600 text-xs">▼ ดูรายละเอียด</span></td>
-          </tr>
-          <tr v-if="!productSummary.length"><td colspan="11" class="text-center py-8 text-slate-400">ไม่มีข้อมูล</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Detail per product -->
-    <div v-if="selectedProductId" class="space-y-3">
-      <div class="bg-blue-50 border-l-4 border-blue-500 rounded p-3 flex items-center justify-between">
-        <div>
-          <div class="text-xs text-slate-500">เลือกสินค้า</div>
-          <div class="text-lg font-bold text-blue-700">{{erp.productName(selectedProductId)}}</div>
-        </div>
-        <button @click="selectedProductId=''" class="text-sm text-slate-600 hover:text-blue-600">← กลับสรุปทั้งหมด</button>
-      </div>
-      <div class="bg-white rounded-xl shadow overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-100"><tr>
-            <th class="p-2 text-left">เลขที่ PO</th>
-            <th class="p-2 text-left">วันที่</th>
-            <th class="p-2 text-left">Customer</th>
-            <th class="p-2 text-right">จำนวน</th>
-            <th class="p-2 text-right">ราคา</th>
-            <th class="p-2 text-right">ขายแล้ว</th>
-            <th class="p-2 text-right">รอขาย</th>
-            <th class="p-2 text-right">มูลค่ารอ</th>
-            <th class="p-2 text-left">วันส่ง</th>
-          </tr></thead>
-          <tbody>
-            <tr v-for="d in productDetail" :key="d.id" class="border-t">
-              <td class="p-2 font-mono">{{d.docNo}}</td>
-              <td class="p-2">{{d.date}}</td>
-              <td class="p-2">{{d.customerName}}</td>
-              <td class="p-2 text-right">{{fmt(d.itemQty)}}</td>
-              <td class="p-2 text-right">{{fmt(d.itemPrice)}}</td>
-              <td class="p-2 text-right text-emerald-700">{{fmt(d.matched)}}</td>
-              <td class="p-2 text-right font-bold text-amber-700">{{fmt(d.remaining)}}</td>
-              <td class="p-2 text-right font-bold">{{fmt(d.remainValue)}}</td>
-              <td class="p-2 text-xs">{{d.deliveryDate||'-'}}</td>
-            </tr>
-            <tr v-if="!productDetail.length"><td colspan="9" class="text-center py-8 text-slate-400">ไม่มีรายการ</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <!-- 🆕 V18 (2026-05-24): ลบ legacy LME productSummary/Detail/Metal group filter/VIEW MODE FILTER ออก
+         เหลือเฉพาะ Pending Sale Table (dual costing) + Sales Plan + LME card -->
 
     <!-- 🆕 PATCH 28 ════════════════════════════════════════════════════
          📋 ตารางรอขาย — เฉพาะ ทองแดง / ทองเหลือง (Dual Costing Categories)
@@ -29101,11 +29604,16 @@ app.component('view-pendingSales', {
       </div>
     </div>
 
-    <!-- Main Table — 🆕 V11: เพิ่ม "ราคาเสนอดีสุด" จาก Sales Plan + กำไรเทียบ Cost Pool -->
+    <!-- Main Table — 🆕 V11+V16: "ราคาเสนอดีสุด" + กำไร · ปุ่ม hide proposal cols -->
     <div v-if="pendingSaleEnriched.length" class="bg-white rounded-xl shadow overflow-hidden">
-      <div class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
-        <h3 class="font-bold text-amber-900 text-sm">🟡 ตารางรอขาย + ราคาเสนอดีสุด — ทองแดง / ทองเหลือง ({{pendingSaleEnriched.length}} รายการ)</h3>
-        <button @click="exportPendingSaleCsv" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">📥 Export CSV</button>
+      <div class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between flex-wrap gap-2">
+        <h3 class="font-bold text-amber-900 text-sm">🟡 ตารางรอขาย — ทองแดง / ทองเหลือง ({{pendingSaleEnriched.length}} รายการ)</h3>
+        <div class="flex gap-2">
+          <button @click="toggleProposalCols" class="text-xs px-3 py-1 rounded font-bold" :class="hideProposalCols?'bg-slate-200 text-slate-700 hover:bg-slate-300':'bg-purple-600 text-white hover:bg-purple-700'">
+            {{hideProposalCols ? '👁 แสดงราคาเสนอ/กำไร' : '🔒 ซ่อนราคาเสนอ/กำไร'}}
+          </button>
+          <button @click="exportPendingSaleCsv" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">📥 Export CSV</button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
@@ -29115,11 +29623,11 @@ app.component('view-pendingSales', {
               <th class="p-2 text-left">หมวด</th>
               <th class="p-2 text-right text-emerald-700">รอขาย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
               <th class="p-2 text-right text-slate-600">ต้นทุน Pool<br><span class="text-[10px] font-normal text-slate-400">(฿/กก.)</span></th>
-              <th class="p-2 text-right bg-amber-50">ราคาเสนอดีสุด<br><span class="text-[10px] font-normal text-slate-400">(จาก Sales Plan)</span></th>
-              <th class="p-2 text-right bg-amber-50">% LME</th>
-              <th class="p-2 text-left bg-amber-50">ลูกค้า</th>
-              <th class="p-2 text-right bg-emerald-50 text-emerald-700">กำไรคาดการณ์<br><span class="text-[10px] font-normal text-slate-400">(฿)</span></th>
-              <th class="p-2 text-right bg-emerald-50">Margin %</th>
+              <!-- 🆕 V16: hide-toggleable proposal columns -->
+              <th v-if="!hideProposalCols" class="p-2 text-right bg-amber-50">ราคาเสนอดีสุด<br><span class="text-[10px] font-normal text-slate-400">(จาก Sales Plan)</span></th>
+              <th v-if="!hideProposalCols" class="p-2 text-right bg-amber-50">% LME</th>
+              <th v-if="!hideProposalCols" class="p-2 text-right bg-emerald-50 text-emerald-700">กำไรคาดการณ์<br><span class="text-[10px] font-normal text-slate-400">(฿)</span></th>
+              <th v-if="!hideProposalCols" class="p-2 text-right bg-emerald-50">Margin %</th>
               <th class="p-2 text-right text-red-700">รอขายจริง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
               <th class="p-2 text-right text-pink-700">ล๊อกขาย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
               <th class="p-2 text-right text-purple-700">PO ซื้อรอส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
@@ -29136,16 +29644,15 @@ app.component('view-pendingSales', {
               <td class="p-2 text-slate-600">{{r.metalGroup}}</td>
               <td class="p-2 text-right" :class="r.pendingSaleQty>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.pendingSaleQty)}}</td>
               <td class="p-2 text-right text-slate-600">{{r.poolUnitCost>0?fmt(r.poolUnitCost):'-'}}</td>
-              <td class="p-2 text-right bg-amber-50 font-bold" :class="r.bestPrice>0?'text-amber-700':'text-slate-300'">
+              <td v-if="!hideProposalCols" class="p-2 text-right bg-amber-50 font-bold" :class="r.bestPrice>0?'text-amber-700':'text-slate-300'">
                 <span v-if="r.bestPrice>0">{{fmt(r.bestPrice)}} <span v-if="r.bestIsLocked" class="text-[10px] text-emerald-600">🔒</span></span>
                 <span v-else>-</span>
               </td>
-              <td class="p-2 text-right bg-amber-50 text-xs">{{r.bestPct>0?r.bestPct.toFixed(1)+'%':'-'}}</td>
-              <td class="p-2 bg-amber-50 text-xs text-slate-600 truncate max-w-[140px]">{{r.bestCustomer||'-'}}</td>
-              <td class="p-2 text-right bg-emerald-50 font-bold" :class="r.bestPrice>0?(r.margin>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
+              <td v-if="!hideProposalCols" class="p-2 text-right bg-amber-50 text-xs">{{r.bestPct>0?r.bestPct.toFixed(1)+'%':'-'}}</td>
+              <td v-if="!hideProposalCols" class="p-2 text-right bg-emerald-50 font-bold" :class="r.bestPrice>0?(r.margin>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
                 {{r.bestPrice>0?fmt(r.margin):'-'}}
               </td>
-              <td class="p-2 text-right bg-emerald-50 text-xs" :class="r.bestPrice>0?(r.marginPct>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
+              <td v-if="!hideProposalCols" class="p-2 text-right bg-emerald-50 text-xs" :class="r.bestPrice>0?(r.marginPct>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
                 {{r.bestPrice>0?r.marginPct.toFixed(1)+'%':'-'}}
               </td>
               <td class="p-2 text-right font-bold" :class="r.realPendingSale<0 ? 'text-red-700 bg-red-100' : (r.realPendingSale>0 ? 'text-emerald-700' : 'text-slate-400')">
@@ -29157,19 +29664,6 @@ app.component('view-pendingSales', {
               <td class="p-2 text-right" :class="r.stock>0?'font-bold text-blue-700':'text-slate-300'">{{fmt(r.stock)}}</td>
             </tr>
           </tbody>
-          <tfoot class="bg-slate-50 border-t-2 border-slate-300">
-            <tr class="font-bold text-slate-700">
-              <td class="p-2" colspan="2">รวม ({{pendingSaleEnriched.length}} รายการ)</td>
-              <td class="p-2 text-right text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleQty)}}</td>
-              <td colspan="4"></td>
-              <td class="p-2 text-right text-emerald-700 bg-emerald-50">{{fmt(pendingSaleEnriched.reduce((s,r)=>s+(r.bestPrice>0?r.margin:0),0))}}</td>
-              <td class="bg-emerald-50"></td>
-              <td class="p-2 text-right" :class="pendingSaleTotals.totalRealPending<0?'text-red-700':'text-slate-700'">{{fmt(pendingSaleTotals.totalRealPending)}}</td>
-              <td class="p-2 text-right text-pink-700">{{fmt(pendingSaleTotals.totalLockedSell)}}</td>
-              <td class="p-2 text-right text-purple-700">{{fmt(pendingSaleTotals.totalLockedBuy)}}</td>
-              <td class="p-2 text-right text-blue-700">{{fmt(pendingSaleTotals.totalStock)}}</td>
-            </tr>
-          </tfoot>
         </table>
       </div>
       <div class="px-4 py-2 bg-slate-50 text-[10px] text-slate-500 border-t italic">
@@ -29184,27 +29678,41 @@ app.component('view-pendingSales', {
 });
 
 /* =================================================================
-   🆕 V12 (2026-05-24): STOCK PLANNING CALENDAR
-   เทียบ Stock + PO Buy ที่จะเข้า vs PO Sell ที่ต้องส่ง
+   🆕 V12+V16 (2026-05-24): STOCK PLANNING — PO Sell-centric
+   มุมมอง: ตาราง 1 PO Sell ต่อแถว + Calendar view
    เน้น 4 หมวด: ทองแดง / ทองเหลือง / อลูมิเนียมกระป๋อง / อลูมิเนียมกระป๋องอัดก้อน
    ================================================================= */
 app.component('view-stockPlanning', {
   setup() {
     const erp = window.$erp; const db = erp.db; const fmt = erp.fmt;
-    const FOCUS_GROUPS = ['ทองแดง','ทองเหลือง','อลูมิเนียมกระป๋อง','อลูมิเนียมกระป๋องอัดก้อน'];
+    /* 🆕 V16: รวม "อลูมิเนียมกระป๋อง" + "อลูมิเนียมกระป๋องอัดก้อน" เป็นกลุ่มเดียวกัน */
+    const FOCUS_GROUPS = ['ทองแดง','ทองเหลือง','อลูมิเนียมกระป๋อง (รวม)'];
+    const ALUMINUM_CAN_GROUPS = ['อลูมิเนียมกระป๋อง','อลูมิเนียมกระป๋องอัดก้อน'];
+    /* helper: คืน "display group" ของ product — รวมกระป๋อง 2 ชนิด */
+    const displayGroupOf = (metalGroup) => {
+      const g = String(metalGroup||'');
+      if (ALUMINUM_CAN_GROUPS.some(x => g.includes(x))) return 'อลูมิเนียมกระป๋อง (รวม)';
+      return g;
+    };
     const filterGroup = ref('');     // '' = all focus groups
     const filterProduct = ref('');
     const showProductsWithoutPO = ref(false);
+    const viewMode = ref('table');                          // 🆕 'table' | 'calendar'
+    const calMonth = ref(erp.today().slice(0,7));           // YYYY-MM
+    const selectedDate = ref('');                            // for drill-down in calendar
+    const expandedPlanProduct = ref('');                     // 🆕 V16: which product row expanded
 
-    /* Eligible products: 4 focus groups */
+    /* Eligible products: 4 focus groups → 3 หลัง merge อลูมิเนียม */
     const focusProducts = computed(() => {
       return (db.products||[]).filter(p => {
         if (!p || p.active === false) return false;
         const g = String(p.metalGroup||'');
-        const matches = FOCUS_GROUPS.some(fg => g.includes(fg)) ||
+        const isFocus = g.includes('ทองแดง') || g.includes('ทองเหลือง') ||
+          ALUMINUM_CAN_GROUPS.some(x => g.includes(x)) ||
           /copper|brass|aluminum|aluminium/i.test(g);
-        if (!matches) return false;
-        if (filterGroup.value && !g.includes(filterGroup.value)) return false;
+        if (!isFocus) return false;
+        const dg = displayGroupOf(g);
+        if (filterGroup.value && dg !== filterGroup.value) return false;
         if (filterProduct.value && p.id !== filterProduct.value) return false;
         return true;
       });
@@ -29342,6 +29850,237 @@ app.component('view-stockPlanning', {
       };
     });
 
+    /* 🆕 V16 (2026-05-24): PRODUCT GROUPS — รวม aluminum cans 2 หมวดเป็น 1 กลุ่ม
+       Copper/Brass: each SKU = 1 group · Aluminum cans: ALL SKUs combined = 1 group */
+    const productGroupTimelines = computed(() => {
+      const today = erp.today();
+      const groups = new Map();
+      productTimelines.value.forEach(prod => {
+        const dg = displayGroupOf(prod.metalGroup);
+        // Key: aluminum cans → 1 combined group; others → per SKU
+        const key = (dg === 'อลูมิเนียมกระป๋อง (รวม)') ? '__GROUP__:aluminum-cans' : ('__SKU__:'+prod.productId);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            groupKey: key,
+            isCombined: key.startsWith('__GROUP__'),
+            displayName: key.startsWith('__GROUP__:aluminum') ? 'อลูมิเนียมกระป๋อง (รวม)' : (prod.productCode + ' — ' + prod.productName),
+            metalGroup: dg,
+            productIds: [], productCodes: [], productNames: [],
+            stockNow: 0, totalValue: 0,
+            events: [],
+          });
+        }
+        const g = groups.get(key);
+        g.productIds.push(prod.productId);
+        g.productCodes.push(prod.productCode);
+        g.productNames.push(prod.productName);
+        g.stockNow += prod.stockNow;
+        g.totalValue += prod.stockValue;
+        // Carry productName onto each event for display
+        prod.events.forEach(ev => {
+          g.events.push({...ev, productId: prod.productId, productName: prod.productName, productCode: prod.productCode});
+        });
+      });
+      // For each group: rebuild merged timeline + per-PO sell rows
+      return Array.from(groups.values()).map(g => {
+        g.wac = g.stockNow > 0 ? g.totalValue / g.stockNow : 0;
+        const sortedEvents = [...g.events].sort((a,b) => {
+          const d = (a.date||'').localeCompare(b.date||'');
+          if (d !== 0) return d;
+          return a.type === 'buy' ? -1 : 1;
+        });
+        let bal = g.stockNow;
+        let firstShortageDate = null;
+        let maxShortageQty = 0;
+        const poSellRows = [];
+        const buyEvents = sortedEvents.filter(x => x.type === 'buy');
+        sortedEvents.forEach(ev => {
+          if (ev.type === 'buy') {
+            bal += ev.qty;
+          } else {
+            const need = Math.abs(ev.qty);
+            const before = bal;
+            const shortage = Math.max(0, need - before);
+            const enough = shortage <= 0.01;
+            const daysUntil = Math.round((new Date(ev.date) - new Date(today)) / 86400000);
+            let urgency = 'ok';
+            if (!enough) {
+              if (daysUntil < 0) urgency = 'overdue';
+              else if (daysUntil <= 7) urgency = 'critical';
+              else if (daysUntil <= 30) urgency = 'warning';
+              else urgency = 'planning';
+            }
+            const buysBeforeThis = buyEvents.filter(x => (x.date||'') <= (ev.date||''));
+            const totalBuyBefore = buysBeforeThis.reduce((s,x)=>s+x.qty,0);
+            poSellRows.push({
+              poId: ev.poId, poDocNo: ev.docNo, customer: ev.party,
+              deliveryDate: ev.date, daysUntil,
+              productId: ev.productId, productCode: ev.productCode, productName: ev.productName,
+              metalGroup: g.metalGroup,
+              need, before, after: before - need,
+              stockNow: g.stockNow,
+              totalBuyBefore, buysBeforeThis,
+              shortage, needToBuy: shortage,
+              enough, urgency,
+              sellPrice: ev.unitPrice, channel: ev.channel,
+            });
+            if (!enough && !firstShortageDate) firstShortageDate = ev.date;
+            if (!enough && shortage > maxShortageQty) maxShortageQty = shortage;
+            bal -= need;
+          }
+        });
+        g.poSellRows = poSellRows.sort((a,b) => (a.deliveryDate||'9999').localeCompare(b.deliveryDate||'9999'));
+        g.totalSellPending = sortedEvents.filter(e => e.type==='sell').reduce((s,e)=>s+Math.abs(e.qty),0);
+        g.totalBuyComing = sortedEvents.filter(e => e.type==='buy').reduce((s,e)=>s+e.qty,0);
+        g.finalBalance = bal;
+        g.firstShortageDate = firstShortageDate;
+        g.maxShortageQty = maxShortageQty;
+        g.poSellCount = poSellRows.length;
+        g.shortCount = poSellRows.filter(r => !r.enough).length;
+        g.urgencyLevel = (() => {
+          if (firstShortageDate) {
+            const daysUntil = Math.round((new Date(firstShortageDate) - new Date(today)) / 86400000);
+            if (daysUntil < 0) return 'overdue';
+            if (daysUntil < 7) return 'critical';
+            if (daysUntil < 30) return 'warning';
+            return 'planning';
+          }
+          return 'ok';
+        })();
+        return g;
+      })
+      .filter(g => showProductsWithoutPO.value ? true : (g.poSellCount > 0 || g.totalBuyComing > 0))
+      .sort((a,b) => {
+        const order = { overdue: 0, critical: 1, warning: 2, planning: 3, ok: 4 };
+        if (order[a.urgencyLevel] !== order[b.urgencyLevel]) return order[a.urgencyLevel] - order[b.urgencyLevel];
+        return (a.displayName||'').localeCompare(b.displayName||'');
+      });
+    });
+
+    /* 🆕 V16: Flat PO Sell rows (for calendar view) — flatten จาก groups */
+    const poSellRows = computed(() => {
+      const rows = [];
+      productGroupTimelines.value.forEach(g => {
+        g.poSellRows.forEach(r => rows.push({...r, groupName: g.displayName}));
+      });
+      return rows.sort((a,b) => (a.deliveryDate||'9999').localeCompare(b.deliveryDate||'9999'));
+    });
+
+    const poSellSummary = computed(() => {
+      const arr = poSellRows.value;
+      return {
+        count: arr.length,
+        enough: arr.filter(r => r.enough).length,
+        short: arr.filter(r => !r.enough).length,
+        overdue: arr.filter(r => r.urgency === 'overdue').length,
+        critical: arr.filter(r => r.urgency === 'critical').length,
+        warning: arr.filter(r => r.urgency === 'warning').length,
+        totalNeed: arr.reduce((s,r)=>s+r.need,0),
+        totalShortage: arr.reduce((s,r)=>s+r.shortage,0),
+      };
+    });
+
+    function toggleExpandPlan(key) {
+      expandedPlanProduct.value = expandedPlanProduct.value === key ? '' : key;
+    }
+
+    /* 🆕 V17 (2026-05-24): Shortage Alert — สรุปสินค้าที่ขาด พร้อมราคาต้นทุน + ราคาขาย PO ที่ไม่พอ */
+    const shortageAlerts = computed(() => {
+      const list = [];
+      productGroupTimelines.value.forEach(g => {
+        if (g.maxShortageQty <= 0.01) return;
+        // หา PO Sells ที่ขาด → แสดงราคาขาย (ดึงจาก poSellRows)
+        const shortRows = g.poSellRows.filter(r => !r.enough);
+        if (!shortRows.length) return;
+        // ราคาขายเฉลี่ย (weighted by shortage)
+        const totalShortQty = shortRows.reduce((s,r)=>s+r.shortage,0);
+        const weightedSellPrice = totalShortQty > 0
+          ? shortRows.reduce((s,r)=>s+r.shortage*Number(r.sellPrice||0),0) / totalShortQty
+          : 0;
+        const minSell = Math.min(...shortRows.map(r => Number(r.sellPrice||0)).filter(v=>v>0));
+        const maxSell = Math.max(...shortRows.map(r => Number(r.sellPrice||0)));
+        const earliestShort = shortRows.reduce((min,r) => (!min || (r.deliveryDate||'9999') < (min.deliveryDate||'9999')) ? r : min, null);
+        list.push({
+          groupKey: g.groupKey,
+          displayName: g.displayName,
+          metalGroup: g.metalGroup,
+          isCombined: g.isCombined,
+          stockNow: g.stockNow,
+          avgCost: g.wac,               // ต้นทุนเฉลี่ย (WAC)
+          shortageQty: g.maxShortageQty,
+          shortRowCount: shortRows.length,
+          minSellPrice: minSell,
+          maxSellPrice: maxSell,
+          avgSellPrice: weightedSellPrice,
+          earliestShortDate: earliestShort?.deliveryDate || '',
+          earliestShortPO: earliestShort?.poDocNo || '',
+          earliestShortCustomer: earliestShort?.customer || '',
+          // คำนวณ "ต้องซื้อในงบเท่าไหร่" — ถ้าซื้อในราคาต้นทุนเฉลี่ย
+          buyBudget: g.maxShortageQty * g.wac,
+          // กำไรขั้นต้นที่จะหายไปถ้าไม่ซื้อมาส่ง
+          potentialMargin: g.maxShortageQty * (weightedSellPrice - g.wac),
+          urgency: g.urgencyLevel,
+        });
+      });
+      return list.sort((a,b) => {
+        const order = { overdue: 0, critical: 1, warning: 2, planning: 3, ok: 4 };
+        if (order[a.urgency] !== order[b.urgency]) return order[a.urgency] - order[b.urgency];
+        return b.shortageQty - a.shortageQty;
+      });
+    });
+    const shortageTotals = computed(() => {
+      const arr = shortageAlerts.value;
+      return {
+        count: arr.length,
+        totalQty: arr.reduce((s,r)=>s+r.shortageQty,0),
+        totalBudget: arr.reduce((s,r)=>s+r.buyBudget,0),
+        totalPotentialMargin: arr.reduce((s,r)=>s+r.potentialMargin,0),
+      };
+    });
+
+    /* 🆕 V16: Calendar — group poSellRows by date, render month grid */
+    const calendarDays = computed(() => {
+      const [y, m] = calMonth.value.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const rowsByDate = new Map();
+      poSellRows.value.forEach(r => {
+        const k = r.deliveryDate || '';
+        if (!k || k.slice(0,7) !== calMonth.value) return;
+        if (!rowsByDate.has(k)) rowsByDate.set(k, []);
+        rowsByDate.get(k).push(r);
+      });
+      const days = [];
+      for (let d = 1; d <= lastDay; d++) {
+        const dateStr = `${calMonth.value}-${String(d).padStart(2,'0')}`;
+        const rs = rowsByDate.get(dateStr) || [];
+        const shortCount = rs.filter(r => !r.enough).length;
+        days.push({
+          date: dateStr, day: d, dow: new Date(dateStr).getDay(),
+          rows: rs, shortCount, hasAny: rs.length > 0,
+        });
+      }
+      return days;
+    });
+    const calendarWeeks = computed(() => {
+      const list = calendarDays.value;
+      if (!list.length) return [];
+      const firstDow = list[0].dow;
+      const cells = [];
+      for (let i=0;i<firstDow;i++) cells.push(null);
+      list.forEach(d => cells.push(d));
+      while (cells.length % 7 !== 0) cells.push(null);
+      const w = [];
+      for (let i=0;i<cells.length;i+=7) w.push(cells.slice(i,i+7));
+      return w;
+    });
+    function changeCalMonth(delta) {
+      const [y,m] = calMonth.value.split('-').map(Number);
+      const d = new Date(y, m-1+delta, 1);
+      calMonth.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      selectedDate.value = '';
+    }
+    const todayStr = computed(() => erp.today());
+
     const expandedProduct = ref('');
     function toggleExpand(pid) {
       expandedProduct.value = expandedProduct.value === pid ? '' : pid;
@@ -29362,141 +30101,348 @@ app.component('view-stockPlanning', {
     }
 
     return { db, erp, fmt, FOCUS_GROUPS, filterGroup, filterProduct, showProductsWithoutPO,
-      focusProducts, productTimelines, planSummary, expandedProduct, toggleExpand, exportCsv };
+      focusProducts, productTimelines, planSummary, expandedProduct, toggleExpand, exportCsv,
+      /* 🆕 V16 */
+      viewMode, calMonth, selectedDate, poSellRows, poSellSummary,
+      productGroupTimelines, expandedPlanProduct, toggleExpandPlan,
+      calendarDays, calendarWeeks, changeCalMonth, todayStr,
+      /* 🆕 V17: Shortage alerts */
+      shortageAlerts, shortageTotals };
   },
   template: `
   <div class="space-y-3">
-    <div class="bg-gradient-to-r from-purple-600 to-indigo-700 text-white rounded-xl p-4 shadow">
-      <h1 class="text-xl font-bold">📅 วางแผนสต๊อก vs PO Sell — Stock Planning Calendar</h1>
-      <p class="text-sm opacity-80 mt-1">เทียบ Stock + PO Buy ที่จะเข้า vs PO Sell ที่ต้องส่ง · เน้น 🥉 ทองแดง · 🌟 ทองเหลือง · 🥫 อลูมิเนียมกระป๋อง · 🧱 อลูมิเนียมกระป๋องอัดก้อน · แจ้งเตือนเมื่อ Stock จะไม่พอ</p>
+    <div class="bg-gradient-to-r from-purple-600 to-indigo-700 text-white rounded-xl p-4 shadow flex justify-between items-start flex-wrap gap-2">
+      <div>
+        <h1 class="text-xl font-bold">📅 วางแผนสต๊อก vs PO Sell</h1>
+        <p class="text-sm opacity-80 mt-1">PO Sell เป็นที่ตั้ง · เทียบ Stock + PO Buy เข้าก่อนวันส่ง · เน้น 🥉 ทองแดง · 🌟 ทองเหลือง · 🥫 อลูมิเนียมกระป๋อง · 🧱 กระป๋องอัดก้อน</p>
+      </div>
+      <!-- View toggle -->
+      <div class="flex bg-white/15 rounded-lg p-1">
+        <button @click="viewMode='table'" :class="['px-4 py-1.5 rounded text-sm font-bold', viewMode==='table'?'bg-white text-purple-700':'text-white']">📋 Table</button>
+        <button @click="viewMode='calendar'" :class="['px-4 py-1.5 rounded text-sm font-bold', viewMode==='calendar'?'bg-white text-purple-700':'text-white']">🗓 Calendar</button>
+      </div>
     </div>
 
-    <!-- Summary KPIs -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-      <div class="bg-red-50 rounded-xl shadow p-3 border-l-4 border-red-600">
-        <div class="text-xs text-red-700">🔴 CRITICAL (≤7 วัน)</div>
-        <div class="text-2xl font-bold text-red-700">{{planSummary.critical}}</div>
-        <div class="text-xs text-slate-500">สินค้า shortage ด่วน</div>
-      </div>
-      <div class="bg-amber-50 rounded-xl shadow p-3 border-l-4 border-amber-500">
-        <div class="text-xs text-amber-700">🟡 WARNING (≤30 วัน)</div>
-        <div class="text-2xl font-bold text-amber-700">{{planSummary.warning}}</div>
-        <div class="text-xs text-slate-500">ต้องวางแผนรับเพิ่ม</div>
-      </div>
-      <div class="bg-blue-50 rounded-xl shadow p-3 border-l-4 border-blue-500">
-        <div class="text-xs text-blue-700">🔵 PLANNING (>30 วัน)</div>
-        <div class="text-2xl font-bold text-blue-700">{{planSummary.planning}}</div>
-        <div class="text-xs text-slate-500">ติดตามต่อ</div>
+    <!-- Summary KPIs (Stock-centric — เน้นสต๊อกพอไหม) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-white rounded-xl shadow p-3 border-l-4 border-purple-500">
+        <div class="text-xs text-slate-500">📋 PO Sell ค้างส่ง</div>
+        <div class="text-2xl font-bold text-purple-700">{{poSellSummary.count}}</div>
       </div>
       <div class="bg-emerald-50 rounded-xl shadow p-3 border-l-4 border-emerald-500">
-        <div class="text-xs text-emerald-700">✅ OK</div>
-        <div class="text-2xl font-bold text-emerald-700">{{planSummary.ok}}</div>
-        <div class="text-xs text-slate-500">Stock พอ</div>
+        <div class="text-xs text-emerald-700">✅ เพียงพอ</div>
+        <div class="text-2xl font-bold text-emerald-700">{{poSellSummary.enough}}</div>
+      </div>
+      <div class="bg-red-50 rounded-xl shadow p-3 border-l-4 border-red-600">
+        <div class="text-xs text-red-700">⚠ ขาด</div>
+        <div class="text-2xl font-bold text-red-700">{{poSellSummary.short}}</div>
+        <div class="text-[10px] text-red-600">เกินกำหนด {{poSellSummary.overdue}} · 7วัน {{poSellSummary.critical}}</div>
       </div>
       <div class="bg-white rounded-xl shadow p-3">
-        <div class="text-xs text-slate-500">รวม Shortage</div>
-        <div class="text-2xl font-bold" :class="planSummary.totalShortageQty>0?'text-red-700':'text-slate-700'">{{fmt(planSummary.totalShortageQty)}}</div>
-        <div class="text-xs text-slate-500">กก. ที่ขาด</div>
+        <div class="text-xs text-slate-500">ต้องซื้อเพิ่ม</div>
+        <div class="text-xl font-bold" :class="poSellSummary.totalShortage>0?'text-red-700':'text-slate-700'">{{fmt(poSellSummary.totalShortage)}}</div>
+        <div class="text-[10px] text-slate-500">กก. รวม</div>
       </div>
     </div>
 
     <!-- Filter bar -->
     <div class="bg-white rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
       <select v-model="filterGroup" class="px-3 py-2 border rounded-lg text-sm">
-        <option value="">ทุกหมวด (4 focus)</option>
+        <option value="">ทุกหมวด (3 focus)</option>
         <option v-for="g in FOCUS_GROUPS" :key="g" :value="g">{{g}}</option>
       </select>
       <select v-model="filterProduct" class="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[200px]">
         <option value="">ทุกสินค้า</option>
         <option v-for="p in focusProducts" :key="p.id" :value="p.id">{{p.code}} - {{p.name}}</option>
       </select>
-      <label class="text-sm flex items-center gap-1"><input type="checkbox" v-model="showProductsWithoutPO"> แสดงสินค้าที่ไม่มี PO</label>
       <button @click="exportCsv" class="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm">📥 Export</button>
     </div>
 
-    <!-- Product cards -->
-    <div v-if="!productTimelines.length" class="bg-white rounded-xl shadow p-8 text-center text-slate-400">
-      ไม่มีสินค้าใน 4 หมวด focus ที่มี PO Sell หรือ PO Buy active
-    </div>
-    <div v-for="r in productTimelines" :key="r.productId" class="bg-white rounded-xl shadow overflow-hidden border-l-4"
-      :class="r.urgencyLevel==='critical'?'border-red-600':r.urgencyLevel==='warning'?'border-amber-500':r.urgencyLevel==='planning'?'border-blue-500':'border-emerald-500'">
-      <!-- Product header -->
-      <div class="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-50" @click="toggleExpand(r.productId)">
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="font-mono text-xs text-slate-500">{{r.productCode}}</span>
-            <span class="font-bold">{{r.productName}}</span>
-            <span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs">{{r.metalGroup}}</span>
-            <span v-if="r.urgencyLevel==='critical'" class="px-2 py-0.5 bg-red-600 text-white rounded text-xs font-bold animate-pulse">🚨 CRITICAL — Shortage {{r.firstShortageDate}}</span>
-            <span v-else-if="r.urgencyLevel==='warning'" class="px-2 py-0.5 bg-amber-500 text-white rounded text-xs font-bold">⚠ WARNING — Shortage {{r.firstShortageDate}}</span>
-            <span v-else-if="r.urgencyLevel==='planning'" class="px-2 py-0.5 bg-blue-500 text-white rounded text-xs font-bold">🔵 PLANNING — Shortage {{r.firstShortageDate}}</span>
-            <span v-else class="px-2 py-0.5 bg-emerald-500 text-white rounded text-xs font-bold">✅ OK</span>
-          </div>
-          <div class="text-xs text-slate-500 mt-1">
-            Stock: <b>{{fmt(r.stockNow)}}</b> กก. · WAC <b>{{fmt(r.wac)}}</b> ฿/กก.
-            · PO Buy เข้า: <b class="text-emerald-700">+{{fmt(r.totalBuyComing)}}</b> กก.
-            · PO Sell ส่ง: <b class="text-red-700">−{{fmt(r.totalSellPending)}}</b> กก.
-            · สมดุลสุดท้าย: <b :class="r.finalBalance<0?'text-red-700':'text-emerald-700'">{{fmt(r.finalBalance)}}</b> กก.
-            <span v-if="r.maxShortageQty>0" class="text-red-700 font-bold">· ⚠ Shortage สูงสุด {{fmt(r.maxShortageQty)}} กก.</span>
-          </div>
+    <!-- 🆕 V17 (2026-05-24): Shortage Alert — สินค้าที่ต้องซื้อเพิ่ม + ราคาต้นทุน + ราคาขาย -->
+    <div v-if="shortageAlerts.length > 0" class="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-400 rounded-xl shadow-lg p-4">
+      <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div>
+          <h3 class="text-lg font-bold text-red-800 flex items-center gap-2">
+            🚨 ต้องซื้อสินค้าเพิ่มด่วน — {{shortageTotals.count}} สินค้า
+          </h3>
+          <p class="text-xs text-red-700 mt-1">
+            <b>รวม Shortage:</b> {{fmt(shortageTotals.totalQty)}} กก. ·
+            <b>งบประมาณซื้อ (ราคา WAC):</b> ฿{{fmt(shortageTotals.totalBudget)}} ·
+            <b>กำไรที่จะหายถ้าไม่ซื้อ:</b> ฿{{fmt(shortageTotals.totalPotentialMargin)}}
+          </p>
         </div>
-        <div class="text-slate-400">{{expandedProduct===r.productId?'▼':'▶'}}</div>
+      </div>
+      <div class="bg-white rounded-lg p-2 overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-red-100">
+            <tr>
+              <th class="p-2 text-left">สินค้า</th>
+              <th class="p-2 text-center">หมวด</th>
+              <th class="p-2 text-right text-blue-700">Stock ตอนนี้<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right bg-red-50">⚠ ต้องซื้อเพิ่ม<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right">ต้นทุนเฉลี่ย<br><span class="text-[10px] font-normal text-slate-400">฿/กก. (WAC)</span></th>
+              <th class="p-2 text-right">งบประมาณซื้อ<br><span class="text-[10px] font-normal text-slate-400">฿</span></th>
+              <th class="p-2 text-right bg-emerald-50">ราคาขาย PO ที่ขาด<br><span class="text-[10px] font-normal text-slate-400">฿/กก.</span></th>
+              <th class="p-2 text-right bg-emerald-50">กำไรที่จะได้<br><span class="text-[10px] font-normal text-slate-400">฿</span></th>
+              <th class="p-2 text-left">PO Sell แรกที่ขาด</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in shortageAlerts" :key="s.groupKey" class="border-t hover:bg-red-50/40">
+              <td class="p-2 font-bold">{{s.displayName}}</td>
+              <td class="p-2 text-center"><span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px]">{{s.metalGroup}}</span></td>
+              <td class="p-2 text-right text-blue-700">{{fmt(s.stockNow)}}</td>
+              <td class="p-2 text-right bg-red-50 font-bold text-red-700">⚠ {{fmt(s.shortageQty)}}</td>
+              <td class="p-2 text-right">{{s.avgCost>0?fmt(s.avgCost):'-'}}</td>
+              <td class="p-2 text-right font-bold text-red-700">฿{{fmt(s.buyBudget)}}</td>
+              <td class="p-2 text-right bg-emerald-50 font-bold text-emerald-700">
+                <span v-if="s.avgSellPrice>0">{{fmt(s.avgSellPrice)}}</span>
+                <span v-else class="text-slate-300">-</span>
+                <div v-if="s.minSellPrice !== s.maxSellPrice && s.shortRowCount>1" class="text-[10px] font-normal text-slate-500">{{fmt(s.minSellPrice)}}-{{fmt(s.maxSellPrice)}}</div>
+              </td>
+              <td class="p-2 text-right bg-emerald-50 font-bold" :class="s.potentialMargin>=0?'text-emerald-700':'text-red-600'">
+                ฿{{fmt(s.potentialMargin)}}
+                <div class="text-[10px] font-normal" v-if="s.avgSellPrice>0 && s.avgCost>0">{{((s.avgSellPrice-s.avgCost)/s.avgCost*100).toFixed(1)}}%</div>
+              </td>
+              <td class="p-2 text-xs">
+                <div class="font-mono font-bold">{{s.earliestShortPO}}</div>
+                <div class="text-slate-400 text-[10px]">📅 {{s.earliestShortDate}}</div>
+                <div class="text-slate-500 truncate max-w-[160px]">{{s.earliestShortCustomer}}</div>
+              </td>
+            </tr>
+          </tbody>
+          <tfoot class="bg-red-100 font-bold">
+            <tr>
+              <td colspan="3" class="p-2 text-right">รวม {{shortageTotals.count}} สินค้า:</td>
+              <td class="p-2 text-right bg-red-50 text-red-700">{{fmt(shortageTotals.totalQty)}}</td>
+              <td></td>
+              <td class="p-2 text-right text-red-700">฿{{fmt(shortageTotals.totalBudget)}}</td>
+              <td class="bg-emerald-50"></td>
+              <td class="p-2 text-right bg-emerald-50" :class="shortageTotals.totalPotentialMargin>=0?'text-emerald-700':'text-red-600'">฿{{fmt(shortageTotals.totalPotentialMargin)}}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="text-[11px] text-red-700 mt-2 italic">
+        💡 <b>งบประมาณซื้อ</b> = shortage × WAC ปัจจุบัน · <b>กำไรที่จะได้</b> = (ราคาขาย − WAC) × shortage — ถ้าซื้อมาส่งทัน
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         🆕 V16: TABLE VIEW — สินค้า (group) ขึ้นก่อน → PO Sell ที่เกี่ยวข้องใต้
+         ════════════════════════════════════════════════════════════════ -->
+    <div v-if="viewMode==='table'" class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="px-4 py-3 bg-purple-50 border-b text-sm font-bold text-purple-900">
+        📋 สรุปสินค้า + PO Sell ที่ค้างส่ง — เรียงตามความเร่งด่วน · กดขยายเพื่อดู PO Sell ภายใต้สินค้า ({{productGroupTimelines.length}} สินค้า)
+      </div>
+      <div v-if="!productGroupTimelines.length" class="p-8 text-center text-slate-400">
+        ไม่มีสินค้าใน 3 หมวด focus ที่มี PO Sell หรือ PO Buy active
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left w-8"></th>
+              <th class="p-2 text-left">สินค้า</th>
+              <th class="p-2 text-center">หมวด</th>
+              <th class="p-2 text-right text-blue-700">Stock ตอนนี้<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-emerald-700">PO Buy กำลังเข้า<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-red-700">PO Sell ค้างส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right">สมดุลสุดท้าย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right bg-red-50">ต้องซื้อเพิ่ม<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-center">จำนวน PO</th>
+              <th class="p-2 text-center">สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="g in productGroupTimelines" :key="g.groupKey">
+            <tr class="border-t hover:bg-purple-50/30 cursor-pointer"
+              :class="g.urgencyLevel==='overdue'||g.urgencyLevel==='critical'?'bg-red-50/40':''"
+              @click="toggleExpandPlan(g.groupKey)">
+              <td class="p-2 text-center text-purple-400">{{expandedPlanProduct===g.groupKey?'▼':'▶'}}</td>
+              <td class="p-2">
+                <div class="font-bold text-slate-800">{{g.displayName}}</div>
+                <div v-if="g.isCombined" class="text-[10px] text-slate-500 mt-0.5">รวม {{g.productIds.length}} รายการ · {{g.productCodes.join(', ')}}</div>
+              </td>
+              <td class="p-2 text-center"><span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px]">{{g.metalGroup}}</span></td>
+              <td class="p-2 text-right text-blue-700 font-bold">{{fmt(g.stockNow)}}</td>
+              <td class="p-2 text-right text-emerald-700">{{g.totalBuyComing>0?'+'+fmt(g.totalBuyComing):'—'}}</td>
+              <td class="p-2 text-right text-red-700">{{g.totalSellPending>0?'−'+fmt(g.totalSellPending):'—'}}</td>
+              <td class="p-2 text-right font-bold" :class="g.finalBalance<0?'text-red-700':'text-emerald-700'">{{fmt(g.finalBalance)}}</td>
+              <td class="p-2 text-right bg-red-50 font-bold" :class="g.maxShortageQty>0?'text-red-700':'text-emerald-700'">
+                <span v-if="g.maxShortageQty>0">⚠ {{fmt(g.maxShortageQty)}}</span>
+                <span v-else>0</span>
+              </td>
+              <td class="p-2 text-center">
+                <span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded font-bold">{{g.poSellCount}}</span>
+                <div v-if="g.shortCount>0" class="text-[10px] text-red-600 font-bold mt-0.5">⚠ ขาด {{g.shortCount}}</div>
+              </td>
+              <td class="p-2 text-center">
+                <span v-if="g.urgencyLevel==='ok'" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">✅ พอ</span>
+                <span v-else-if="g.urgencyLevel==='overdue'" class="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold animate-pulse">🚨 OVERDUE</span>
+                <span v-else-if="g.urgencyLevel==='critical'" class="px-2 py-0.5 bg-red-500 text-white rounded text-[10px] font-bold">🔴 ด่วน</span>
+                <span v-else-if="g.urgencyLevel==='warning'" class="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-bold">🟡 เตือน</span>
+                <span v-else class="px-2 py-0.5 bg-blue-500 text-white rounded text-[10px] font-bold">🔵 วางแผน</span>
+              </td>
+            </tr>
+            <!-- Drill-in: PO Sells under this product -->
+            <tr v-if="expandedPlanProduct===g.groupKey" class="bg-slate-50">
+              <td></td>
+              <td colspan="9" class="p-3">
+                <div class="bg-white rounded border p-2">
+                  <div class="text-xs font-bold text-slate-700 mb-2">📋 PO Sell ภายใต้ {{g.displayName}} ({{g.poSellRows.length}} รายการ)</div>
+                  <table v-if="g.poSellRows.length" class="w-full text-xs">
+                    <thead class="bg-slate-100">
+                      <tr>
+                        <th class="p-2 text-left">PO Sell</th>
+                        <th class="p-2 text-left">วันส่ง</th>
+                        <th class="p-2 text-center">+/- วัน</th>
+                        <th v-if="g.isCombined" class="p-2 text-left">สินค้า</th>
+                        <th class="p-2 text-right">ต้องส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                        <th class="p-2 text-right text-emerald-700">PO Buy เข้าก่อน<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                        <th class="p-2 text-right">มี ณ วันส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                        <th class="p-2 text-right bg-red-50">ต้องซื้อเพิ่ม<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                        <th class="p-2 text-center">สถานะ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="r in g.poSellRows" :key="r.poId+'-'+r.deliveryDate" class="border-t" :class="!r.enough?'bg-red-50/60':''">
+                        <td class="p-2 font-mono font-bold">{{r.poDocNo}}</td>
+                        <td class="p-2 font-mono">{{r.deliveryDate||'-'}}</td>
+                        <td class="p-2 text-center text-xs">
+                          <span v-if="r.daysUntil<0" class="px-1.5 py-0.5 bg-red-600 text-white rounded font-bold">เลย {{Math.abs(r.daysUntil)}}</span>
+                          <span v-else-if="r.daysUntil===0" class="px-1.5 py-0.5 bg-orange-600 text-white rounded font-bold">วันนี้</span>
+                          <span v-else-if="r.daysUntil<=7" class="px-1.5 py-0.5 bg-amber-500 text-white rounded font-bold">+{{r.daysUntil}}</span>
+                          <span v-else class="text-slate-600">+{{r.daysUntil}}</span>
+                        </td>
+                        <td v-if="g.isCombined" class="p-2 text-xs">{{r.productCode}}</td>
+                        <td class="p-2 text-right font-bold text-amber-700">{{fmt(r.need)}}</td>
+                        <td class="p-2 text-right text-emerald-700" :title="r.buysBeforeThis.map(b => b.docNo+' '+b.date+': +'+fmt(b.qty)).join('\\n')">
+                          <template v-if="r.totalBuyBefore>0">+{{fmt(r.totalBuyBefore)}} <span class="text-[10px] text-slate-400">({{r.buysBeforeThis.length}} PO)</span></template>
+                          <span v-else class="text-slate-300">—</span>
+                        </td>
+                        <td class="p-2 text-right font-bold" :class="r.before>=r.need?'text-emerald-700':'text-red-700'">{{fmt(r.before)}}</td>
+                        <td class="p-2 text-right bg-red-50 font-bold" :class="r.needToBuy>0?'text-red-700':'text-emerald-700'">
+                          <span v-if="r.needToBuy>0">⚠ {{fmt(r.needToBuy)}}</span>
+                          <span v-else>0</span>
+                        </td>
+                        <td class="p-2 text-center">
+                          <span v-if="r.enough" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">✅ พอ</span>
+                          <span v-else-if="r.urgency==='overdue'" class="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold">🚨 OVERDUE</span>
+                          <span v-else-if="r.urgency==='critical'" class="px-2 py-0.5 bg-red-500 text-white rounded text-[10px] font-bold">🔴 ด่วน</span>
+                          <span v-else-if="r.urgency==='warning'" class="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-bold">🟡 ขาด</span>
+                          <span v-else class="px-2 py-0.5 bg-blue-500 text-white rounded text-[10px] font-bold">🔵 ขาด (ไกล)</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-else class="p-3 text-center text-slate-400 text-xs">ไม่มี PO Sell ค้างส่ง — มีแต่ PO Buy เข้ามา</div>
+                </div>
+              </td>
+            </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-4 py-2 text-[10px] text-slate-500 italic border-t bg-slate-50">
+        💡 <b>สมดุลสุดท้าย</b> = Stock + PO Buy − PO Sell ทั้งหมด · <b>ต้องซื้อเพิ่ม</b> = shortage สูงสุดในไทม์ไลน์ · กดแถวเพื่อดู PO Sell ที่อยู่ภายในสินค้านั้น
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         🆕 V16: CALENDAR VIEW — month grid with PO Sell deliveries
+         ════════════════════════════════════════════════════════════════ -->
+    <div v-if="viewMode==='calendar'" class="space-y-3">
+      <div class="bg-white rounded-xl shadow p-3 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <button @click="changeCalMonth(-1)" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded text-sm">← เดือนก่อน</button>
+          <input type="month" v-model="calMonth" class="px-3 py-2 border rounded text-sm">
+          <button @click="changeCalMonth(1)" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded text-sm">เดือนถัดไป →</button>
+        </div>
+        <div class="flex gap-3 text-xs">
+          <span class="flex items-center gap-1"><span class="w-3 h-3 bg-emerald-500 rounded"></span>พอส่ง</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 bg-red-500 rounded"></span>ขาด</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 bg-yellow-300 rounded ring-2 ring-yellow-500"></span>วันนี้</span>
+        </div>
       </div>
 
-      <!-- Expanded timeline -->
-      <div v-if="expandedProduct===r.productId" class="border-t bg-slate-50">
-        <div v-if="!r.timeline.length" class="p-6 text-center text-slate-400 text-sm">ไม่มี PO Buy หรือ PO Sell คงค้าง</div>
-        <div v-else class="overflow-x-auto">
+      <!-- Calendar grid -->
+      <div class="bg-white rounded-xl shadow overflow-hidden">
+        <div class="grid grid-cols-7 bg-slate-100 border-b">
+          <div v-for="(d,i) in ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์']" :key="i" :class="['p-2 text-center text-xs font-bold', i===0||i===6 ? 'text-red-600' : 'text-slate-700']">{{d}}</div>
+        </div>
+        <div v-for="(week,wi) in calendarWeeks" :key="wi" class="grid grid-cols-7 border-b last:border-b-0">
+          <div v-for="(cell,ci) in week" :key="ci"
+            :class="['min-h-[120px] p-1.5 border-r last:border-r-0 text-xs',
+              cell ? 'cursor-pointer hover:bg-blue-50' : 'bg-slate-50',
+              cell && cell.date === todayStr ? 'bg-yellow-50 ring-2 ring-yellow-400 ring-inset' : '',
+              cell && cell.shortCount > 0 ? 'bg-red-50/40' : (cell && cell.hasAny ? 'bg-emerald-50/40' : '')]"
+            @click="cell && (selectedDate = cell.date)">
+            <div v-if="cell" class="h-full flex flex-col">
+              <div class="flex justify-between items-start mb-1">
+                <span :class="['font-bold', cell.dow===0||cell.dow===6 ? 'text-red-600' : 'text-slate-800']">{{cell.day}}</span>
+                <span v-if="cell.shortCount > 0" class="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold">⚠{{cell.shortCount}}</span>
+                <span v-else-if="cell.hasAny" class="px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold">✓{{cell.rows.length}}</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div v-for="(r,ri) in cell.rows.slice(0,3)" :key="ri"
+                  :class="['rounded px-1 py-0.5 text-[10px] truncate', r.enough?'bg-emerald-100 text-emerald-800':'bg-red-100 text-red-800 font-bold']"
+                  :title="r.poDocNo+' '+r.customer+' '+r.productName+' '+fmt(r.need)+'กก.'">
+                  <span v-if="!r.enough">⚠ </span>{{r.poDocNo}} ({{fmt(r.need)}})
+                </div>
+                <div v-if="cell.rows.length > 3" class="text-[10px] text-slate-500 italic">+ {{cell.rows.length - 3}} เพิ่ม...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Selected date detail -->
+      <div v-if="selectedDate" class="bg-white rounded-xl shadow">
+        <div class="px-4 py-3 border-b bg-blue-50 flex items-center justify-between">
+          <h3 class="font-bold text-blue-900">📋 PO Sell วันที่ {{selectedDate}} ({{(calendarDays.find(d=>d&&d.date===selectedDate)||{rows:[]}).rows.length}} รายการ)</h3>
+          <button @click="selectedDate=''" class="text-slate-400 text-2xl hover:text-slate-600">&times;</button>
+        </div>
+        <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-slate-100">
               <tr>
-                <th class="p-2 text-left">วันที่</th>
-                <th class="p-2 text-left">วันจากวันนี้</th>
-                <th class="p-2 text-center">ประเภท</th>
-                <th class="p-2 text-left">เลขที่ PO</th>
-                <th class="p-2 text-left">คู่ค้า</th>
-                <th class="p-2 text-right">จำนวน (กก.)</th>
-                <th class="p-2 text-right">ก่อน Event</th>
-                <th class="p-2 text-right">หลัง Event</th>
+                <th class="p-2 text-left">PO Sell</th>
+                <th class="p-2 text-left">สินค้า</th>
+                <th class="p-2 text-right">ต้องส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                <th class="p-2 text-right text-emerald-700">PO Buy เข้าก่อน<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                <th class="p-2 text-right">มี ณ วันส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+                <th class="p-2 text-right bg-red-50">ต้องซื้อเพิ่ม<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
                 <th class="p-2 text-center">สถานะ</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(ev, i) in r.timeline" :key="i" class="border-t" :class="ev.isShort?'bg-red-50':ev.type==='buy'?'bg-emerald-50/30':''">
-                <td class="p-2 font-mono">{{ev.date}}</td>
-                <td class="p-2 text-xs">
-                  <span v-if="ev.daysFromToday<0" class="text-red-600">เลย {{Math.abs(ev.daysFromToday)}} วัน</span>
-                  <span v-else-if="ev.daysFromToday===0" class="text-amber-600 font-bold">วันนี้</span>
-                  <span v-else-if="ev.daysFromToday<=7" class="text-amber-700 font-bold">+{{ev.daysFromToday}} วัน</span>
-                  <span v-else>+{{ev.daysFromToday}} วัน</span>
-                </td>
+              <tr v-for="(r,i) in (calendarDays.find(d=>d&&d.date===selectedDate)||{rows:[]}).rows" :key="i" class="border-t" :class="!r.enough?'bg-red-50/60':''">
+                <td class="p-2 font-mono">{{r.poDocNo}}</td>
+                <td class="p-2">{{r.productName}} <span class="text-[10px] text-slate-400">{{r.productCode}}</span></td>
+                <td class="p-2 text-right text-amber-700 font-bold">{{fmt(r.need)}}</td>
+                <td class="p-2 text-right text-emerald-700">{{r.totalBuyBefore>0?'+'+fmt(r.totalBuyBefore):'—'}}</td>
+                <td class="p-2 text-right font-bold" :class="r.before>=r.need?'text-emerald-700':'text-red-700'">{{fmt(r.before)}}</td>
+                <td class="p-2 text-right bg-red-50 font-bold" :class="r.needToBuy>0?'text-red-700':'text-emerald-700'">{{r.needToBuy>0?'⚠ '+fmt(r.needToBuy):'0'}}</td>
                 <td class="p-2 text-center">
-                  <span v-if="ev.type==='buy'" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold">📦 IN</span>
-                  <span v-else class="px-2 py-0.5 bg-red-100 text-red-700 rounded font-bold">📤 OUT</span>
-                </td>
-                <td class="p-2 font-mono">{{ev.docNo}}</td>
-                <td class="p-2 truncate max-w-[150px]">{{ev.party}}</td>
-                <td class="p-2 text-right font-bold" :class="ev.qty>0?'text-emerald-700':'text-red-700'">
-                  {{ev.qty>0?'+':''}}{{fmt(ev.qty)}}
-                </td>
-                <td class="p-2 text-right text-slate-500">{{fmt(ev.beforeBal)}}</td>
-                <td class="p-2 text-right font-bold" :class="ev.afterBal<0?'text-red-700':'text-slate-700'">
-                  {{fmt(ev.afterBal)}}
-                </td>
-                <td class="p-2 text-center">
-                  <span v-if="ev.isShort" class="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold">⚠ ขาด</span>
-                  <span v-else class="text-slate-400 text-[10px]">OK</span>
+                  <span v-if="r.enough" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">✅ พอ</span>
+                  <span v-else class="px-2 py-0.5 bg-red-500 text-white rounded text-[10px] font-bold">⚠ ขาด</span>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+
+      <div v-if="!selectedDate" class="text-xs text-slate-500 text-center py-2 italic">
+        💡 คลิกวันที่ในปฏิทินเพื่อดู detail PO Sell ของวันนั้น
+      </div>
     </div>
 
     <div class="text-xs text-slate-500 italic">
-      💡 <b>การคำนวณ:</b> เริ่มจาก Stock ปัจจุบัน → เรียง PO ตามวันส่ง → +PO Buy เข้า / −PO Sell ออก → ถ้า balance ติดลบหลังจาก PO Sell ใด → แจ้ง Shortage<br/>
-      🚨 <b>CRITICAL:</b> Shortage ภายใน 7 วัน · 🟡 <b>WARNING:</b> ≤30 วัน · 🔵 <b>PLANNING:</b> >30 วัน
+      💡 <b>การคำนวณ:</b> PO Sell แต่ละใบ — ดู Stock ปัจจุบัน + PO Buy ที่เข้าก่อนวันส่ง − PO Sell อื่นที่ส่งก่อน (FIFO) → ถ้าไม่พอ = ต้องซื้อเพิ่ม<br/>
+      🚨 <b>OVERDUE:</b> เลยกำหนดแล้ว · 🔴 <b>≤7 วัน</b> · 🟡 <b>≤30 วัน</b> · 🔵 <b>>30 วัน</b>
     </div>
   </div>`
 });
@@ -29969,6 +30915,30 @@ app.component('view-cashOthersSummary', {
       const used = db.advanceAllocations.filter(x => x.advanceId === a.id && x.advanceType === 'Supplier').reduce((u,x)=>u+Number(x.amount||0),0);
       return s + Number(a.advanceAmountTHB||0) - used;
     }, 0));
+    /* 🆕 V20 (2026-05-24): เงินสำรองจ่าย + กู้กรรมการ ค้างคืน
+       ตามที่ user spec: เข้าหมวด ASSET (ไม่ใช่ debt) เพราะเป็นเงินบริษัทที่ผ่านมือกรรมการ
+       ยกเว้น Loan/Leasing/BSL — อันนั้นเป็นหนี้สิน (อยู่หน้าอื่น) */
+    const pettyAdvanceOutstanding = computed(() => {
+      try {
+        return _trkSafe(db.pettyAdvances).filter(a => a && a.status === 'active').reduce((s,a) => {
+          return s + Math.max(0, Number(a.amount||0) - Number(a.returnedAmount||0));
+        }, 0);
+      } catch(e) { return 0; }
+    });
+    const directorLoanOutstanding = computed(() => {
+      try {
+        return _trkSafe(db.pettyAdvances).filter(a => a && a.status === 'active' && a.type === 'DIRECTOR_LOAN').reduce((s,a) => {
+          return s + Math.max(0, Number(a.amount||0) - Number(a.returnedAmount||0));
+        }, 0);
+      } catch(e) { return 0; }
+    });
+    const pettyCashOutstanding = computed(() => {
+      try {
+        return _trkSafe(db.pettyAdvances).filter(a => a && a.status === 'active' && a.type === 'PETTY_CASH').reduce((s,a) => {
+          return s + Math.max(0, Number(a.amount||0) - Number(a.returnedAmount||0));
+        }, 0);
+      } catch(e) { return 0; }
+    });
     /* expense today */
     const expenseToday = computed(() => db.expenses.filter(e => e.date === erp.today()).reduce((s,e) => s + Number(e.amount||0), 0));
     /* cash needed today = AP overdue + expense today */
@@ -30004,8 +30974,8 @@ app.component('view-cashOthersSummary', {
       return { pendingValue, count, paidTotal, matchedTotal };
     });
 
-    /* GRAND TOTAL — รวม pending issue cost + trading pending */
-    const totalAsset = computed(() => totalCash.value + totalAR.value + stockSummary.value.val + supplierAdvanceTotal.value + pendingIssueSummary.value.cost + tradingPendingSummary.value.pendingValue);
+    /* GRAND TOTAL — รวม pending issue cost + trading pending + 🆕 V20 petty advance */
+    const totalAsset = computed(() => totalCash.value + totalAR.value + stockSummary.value.val + supplierAdvanceTotal.value + pendingIssueSummary.value.cost + tradingPendingSummary.value.pendingValue + pettyAdvanceOutstanding.value);
     const totalDebt = computed(() => totalAP.value + customerAdvanceTotal.value);
     const netWorth = computed(() => totalAsset.value - totalDebt.value);
 
@@ -30017,6 +30987,9 @@ app.component('view-cashOthersSummary', {
       { name:'📦 Pending Sale (รอเปิดบิล)', val: pendingIssueSummary.value.cost, color:'#fbbf24' },
       { name:'🔄 Trading Pending รับเงิน', val: tradingPendingSummary.value.pendingValue, color:'#a855f7' },
       { name:'💸 Supplier Advance', val: supplierAdvanceTotal.value, color:'#8b5cf6' },
+      /* 🆕 V20 */
+      { name:'👔 เงินกู้กรรมการ (รอคืน)', val: directorLoanOutstanding.value, color:'#7c3aed' },
+      { name:'🛒 เงินสำรองจ่าย (รอคืน)', val: pettyCashOutstanding.value, color:'#d97706' },
     ].filter(x => x.val > 0));
     const debtComp = computed(() => [
       { name:'📤 เจ้าหนี้ (AP)', val: totalAP.value, color:'#ef4444' },
@@ -30042,6 +31015,8 @@ app.component('view-cashOthersSummary', {
       arBills, totalAR, arOverseas, arDomestic, arOverdue, customerAdvanceTotal,
       stockSummary, totalAP, apOverdue, supplierAdvanceTotal, expenseToday, cashNeededToday,
       pendingIssueSummary, tradingPendingSummary,
+      /* 🆕 V20: petty/director outstanding (asset) */
+      pettyAdvanceOutstanding, directorLoanOutstanding, pettyCashOutstanding,
       totalAsset, totalDebt, netWorth, assetComp, debtComp, arAging, goTo, fmt:erp.fmt };
   },
   template: `
@@ -30057,6 +31032,31 @@ app.component('view-cashOthersSummary', {
         <div><div class="text-sm opacity-80">Total Debt</div><div class="text-3xl font-bold">{{fmt(totalDebt)}}</div></div>
         <div><div class="text-sm opacity-80">Net Worth</div><div class="text-3xl font-bold">{{fmt(netWorth)}}</div></div>
         <div><div class="text-sm opacity-80">เงินที่ต้องใช้วันนี้</div><div class="text-3xl font-bold" :class="cashNeededToday>totalCash?'text-red-200':''">{{fmt(cashNeededToday)}}</div></div>
+      </div>
+    </div>
+
+    <!-- 🆕 V20 (2026-05-24): เงินกู้กรรมการ + เงินสำรองจ่าย (Asset — ค้างคืน) -->
+    <div v-if="pettyAdvanceOutstanding > 0" class="bg-gradient-to-r from-purple-50 to-amber-50 border-l-4 border-purple-500 rounded-2xl shadow p-4 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-purple-700 flex items-center gap-2">
+          <span class="text-2xl">💼</span> เงินกู้กรรมการ + เงินสำรองจ่าย (Asset — รอคืน)
+        </h3>
+        <button @click="goTo('pettyAdvance')" class="bg-purple-600 text-white px-3 py-1.5 rounded text-xs font-bold">→ จัดการ + คืนเงิน</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div class="bg-white rounded-lg p-3 border border-purple-200">
+          <div class="text-xs text-purple-600">👔 เงินกู้กรรมการ (ค้างคืน)</div>
+          <div class="text-2xl font-bold text-purple-700">฿{{fmt(directorLoanOutstanding)}}</div>
+        </div>
+        <div class="bg-white rounded-lg p-3 border border-amber-200">
+          <div class="text-xs text-amber-600">🛒 เงินสำรองจ่าย (ค้างคืน)</div>
+          <div class="text-2xl font-bold text-amber-700">฿{{fmt(pettyCashOutstanding)}}</div>
+        </div>
+        <div class="bg-white rounded-lg p-3 border-2 border-slate-300">
+          <div class="text-xs text-slate-600 font-bold">💼 รวม (อยู่ใน Asset)</div>
+          <div class="text-2xl font-bold text-slate-700">฿{{fmt(pettyAdvanceOutstanding)}}</div>
+          <div class="text-[10px] text-slate-500 italic">เป็นเงินบริษัทผ่านมือ — ไม่นับเป็นหนี้</div>
+        </div>
       </div>
     </div>
 
@@ -31342,7 +32342,9 @@ app.component('view-supplierTracking', {
     const num = _trkNum, safe = _trkSafe, fmt = erp.fmt;
     const search = ref(''); const year = ref(new Date().getFullYear().toString()); const month = ref(''); const view = ref('list'); const selected = ref(null);
     function inRange(d) { if (!d) return false; if (year.value && _trkYear(d) !== year.value) return false; if (month.value && _trkMonth(d) !== month.value) return false; return true; }
-    function sBills(sid) { return safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && b.supplierId === sid && inRange(b.date)); }
+    /* 🆕 V19 (2026-05-24): ใช้ originalSupplierId ถ้ามี — กันเปลี่ยน supplier ใน bill ทำให้ track เพี้ยน */
+    const _effectiveSupplierId = (b) => (b && (b.originalSupplierId || b.supplierId)) || '';
+    function sBills(sid) { return safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === sid && inRange(b.date)); }
     function sPayments(sid) { return safe(db.payments).filter(p => p && p.supplierId === sid && inRange(p.date)); }
     function aggregate(sid) {
       const bills = sBills(sid);
@@ -31369,7 +32371,7 @@ app.component('view-supplierTracking', {
       const sups = safe(db.suppliers).filter(s => s && s.active);
       return sups.map(s => {
         const months = Array(12).fill(0).map(() => ({ qty:0, amt:0 }));
-        safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && b.supplierId === s.id && _trkYear(b.date) === year.value).forEach(b => {
+        safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === s.id && _trkYear(b.date) === year.value).forEach(b => {
           const mi = parseInt(_trkMonth(b.date)) - 1; if (mi < 0) return;
           safe(b.items).forEach(it => { months[mi].qty += num(it.netWeight); months[mi].amt += num(it.netAmount); });
         });
@@ -31399,7 +32401,7 @@ app.component('view-supplierTracking', {
         return {...p, name:prod.name||'-', code:prod.code||'-', avgBuy:p.qty>0?p.amt/p.qty:0};
       }).sort((a,b)=>b.amt-a.amt);
       const monthlyAll = Array(12).fill(0).map(() => ({ qty:0, amt:0, paidAmt:0, billCount:0 }));
-      safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && b.supplierId === s.id && _trkYear(b.date) === year.value).forEach(b => {
+      safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === s.id && _trkYear(b.date) === year.value).forEach(b => {
         const mi = parseInt(_trkMonth(b.date))-1; if (mi < 0) return;
         monthlyAll[mi].billCount++;
         safe(b.items).forEach(it => { monthlyAll[mi].qty += num(it.netWeight); monthlyAll[mi].amt += num(it.netAmount); });
@@ -33643,10 +34645,60 @@ app.component('view-assetRegister', {
     /* Total monthly depreciation */
     const totalMonthlyDep = computed(() => list.value.reduce((s,a)=>s+a.monthlyDep,0));
 
+    /* 🆕 V21 (2026-05-24): BSL/Leasing tracker — assets with active loans */
+    const bslAssets = computed(() => {
+      const loans = _trkSafe(db.loans).filter(l => l && l.status === 'Active' && l.linkedAssetId);
+      return loans.map(l => {
+        const asset = _trkSafe(db.assets).find(a => a && a.id === l.linkedAssetId);
+        if (!asset) return null;
+        const schedules = _trkSafe(db.loanSchedules).filter(s => s && s.loanId === l.id);
+        const totalDue = schedules.reduce((s,x) => s + Number(x.totalDueAmount||0), 0);
+        const paidAmount = schedules.reduce((s,x) => s + Number(x.paidAmount||0), 0);
+        const outstanding = Math.max(0, totalDue - paidAmount);
+        const paidCount = schedules.filter(s => s.paymentStatus === 'Paid').length;
+        const remainingCount = schedules.length - paidCount;
+        const nextDue = schedules.filter(s => s.paymentStatus !== 'Paid' && s.paymentStatus !== 'Waived')
+          .sort((a,b) => (a.dueDate||'').localeCompare(b.dueDate||''))[0];
+        // คำนวณ NBV (มูลค่าทรัพย์สินตอนนี้)
+        const nbv = erp.assetNBV ? erp.assetNBV(asset.id) : Number(asset.netAssetCost||0);
+        return {
+          loanId: l.id, loanNo: l.loanNo, contractNo: l.contractNo,
+          loanType: l.loanType, lenderName: l.lenderName,
+          assetId: asset.id, assetCode: asset.code, assetName: asset.name, assetCategory: asset.category,
+          originalCost: Number(asset.netAssetCost||0),
+          nbv,
+          principalAmount: Number(l.principalAmount||0),
+          downPayment: Number(l.downPayment||0),
+          financedAmount: Number(l.financedAmount||0),
+          installmentAmount: Number(l.installmentAmount||0),
+          installmentCount: Number(l.installmentCount||0),
+          paidCount, remainingCount,
+          totalDue, paidAmount, outstanding,
+          nextDueDate: nextDue?.dueDate || '',
+          nextDueAmount: Number(nextDue?.totalDueAmount||0),
+          endDate: l.endDate,
+          paidPct: totalDue > 0 ? paidAmount/totalDue*100 : 0,
+        };
+      }).filter(x => x != null).sort((a,b) => (a.nextDueDate||'9999').localeCompare(b.nextDueDate||'9999'));
+    });
+    const bslTotals = computed(() => {
+      const arr = bslAssets.value;
+      return {
+        count: arr.length,
+        totalAssetValue: arr.reduce((s,r)=>s+r.nbv,0),
+        totalFinanced: arr.reduce((s,r)=>s+r.financedAmount,0),
+        totalPaid: arr.reduce((s,r)=>s+r.paidAmount,0),
+        totalOutstanding: arr.reduce((s,r)=>s+r.outstanding,0),
+        monthlyInstallment: arr.reduce((s,r)=>s+r.installmentAmount,0),
+      };
+    });
+
     return { erp, db, fmt, search, filterCat, filterStatus, list, totals, byCategory, byStatus, totalMonthlyDep, showModal, editId, form,
       openAdd, openEdit, save, remove, calcNet, exportCSV, downloadTemplate, importAssets,
       categories: FIN_ASSET_CATEGORIES, statuses: FIN_ASSET_STATUSES,
-      acquisitionTypes: FIN_ACQUISITION_TYPES, depMethods: FIN_DEP_METHODS };
+      acquisitionTypes: FIN_ACQUISITION_TYPES, depMethods: FIN_DEP_METHODS,
+      /* 🆕 V21 */ bslAssets, bslTotals,
+      goToLoan: () => { try { if (window._setView) window._setView('loanContracts'); } catch(e){} } };
   },
   template:`
   <div class="space-y-4">
@@ -33724,6 +34776,86 @@ app.component('view-assetRegister', {
             <span class="font-bold">{{s.count}}</span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 🆕 V21 (2026-05-24): BSL / Leasing Tracker — ทรัพย์สินที่ผ่อนกับธนาคาร/ลีสซิ่ง -->
+    <div v-if="bslAssets.length > 0" class="bg-gradient-to-r from-violet-50 to-purple-50 border-l-4 border-violet-500 rounded-2xl shadow p-4">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="text-lg font-bold text-violet-900 flex items-center gap-2">
+          🏦 BSL / Leasing — ทรัพย์สินที่ยังผ่อนอยู่ ({{bslTotals.count}} รายการ)
+        </h3>
+        <button @click="goToLoan" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded text-xs font-bold">→ จัดการสัญญา (Loan/BSL)</button>
+      </div>
+      <!-- KPI -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        <div class="bg-white rounded-lg p-3 border border-violet-200">
+          <div class="text-xs text-slate-600">มูลค่าทรัพย์สิน (NBV)</div>
+          <div class="text-lg font-bold text-blue-700">฿{{fmt(bslTotals.totalAssetValue)}}</div>
+        </div>
+        <div class="bg-white rounded-lg p-3 border border-violet-200">
+          <div class="text-xs text-slate-600">วงเงิน Financed</div>
+          <div class="text-lg font-bold text-slate-700">฿{{fmt(bslTotals.totalFinanced)}}</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+          <div class="text-xs text-emerald-700">จ่ายแล้ว</div>
+          <div class="text-lg font-bold text-emerald-700">฿{{fmt(bslTotals.totalPaid)}}</div>
+        </div>
+        <div class="bg-red-50 rounded-lg p-3 border border-red-300">
+          <div class="text-xs text-red-700">หนี้คงค้าง</div>
+          <div class="text-lg font-bold text-red-700">฿{{fmt(bslTotals.totalOutstanding)}}</div>
+        </div>
+        <div class="bg-amber-50 rounded-lg p-3 border border-amber-300">
+          <div class="text-xs text-amber-700">งวด/เดือน รวม</div>
+          <div class="text-lg font-bold text-amber-700">฿{{fmt(bslTotals.monthlyInstallment)}}</div>
+        </div>
+      </div>
+      <!-- BSL Table -->
+      <div class="bg-white rounded-lg overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-violet-100">
+            <tr>
+              <th class="p-2 text-left">ทรัพย์สิน</th>
+              <th class="p-2 text-left">เลขสัญญา / Lender</th>
+              <th class="p-2 text-right">มูลค่า NBV</th>
+              <th class="p-2 text-right">วงเงิน</th>
+              <th class="p-2 text-right text-emerald-700">จ่ายแล้ว</th>
+              <th class="p-2 text-right text-red-700">คงค้าง</th>
+              <th class="p-2 text-center">งวด</th>
+              <th class="p-2 text-right">งวด/เดือน</th>
+              <th class="p-2 text-center">% จ่าย</th>
+              <th class="p-2 text-left">ครบกำหนด</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in bslAssets" :key="r.loanId" class="border-t hover:bg-violet-50/40">
+              <td class="p-2">
+                <div class="font-bold">{{r.assetName}}</div>
+                <div class="text-[10px] text-slate-500 font-mono">{{r.assetCode}} · {{r.assetCategory}}</div>
+              </td>
+              <td class="p-2 text-xs">
+                <div class="font-mono">{{r.contractNo}}</div>
+                <div class="text-[10px] text-slate-500">{{r.lenderName}} ({{r.loanType}})</div>
+              </td>
+              <td class="p-2 text-right text-blue-700 font-bold">฿{{fmt(r.nbv)}}</td>
+              <td class="p-2 text-right text-slate-600">฿{{fmt(r.financedAmount)}}</td>
+              <td class="p-2 text-right text-emerald-700 font-bold">฿{{fmt(r.paidAmount)}}</td>
+              <td class="p-2 text-right text-red-700 font-bold">฿{{fmt(r.outstanding)}}</td>
+              <td class="p-2 text-center text-xs">{{r.paidCount}}/{{r.installmentCount}}</td>
+              <td class="p-2 text-right text-amber-700">฿{{fmt(r.installmentAmount)}}</td>
+              <td class="p-2 text-center">
+                <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
+                  <div class="bg-emerald-500 h-full" :style="{width: r.paidPct+'%'}"></div>
+                </div>
+                <div class="text-[10px] text-slate-500 mt-0.5">{{r.paidPct.toFixed(0)}}%</div>
+              </td>
+              <td class="p-2 text-xs">{{r.endDate||'-'}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="text-[10px] text-slate-500 italic mt-2">
+        💡 <b>NBV</b> = Net Book Value (ราคาทรัพย์สินหลังหักค่าเสื่อม) · <b>คงค้าง</b> = หนี้ที่ต้องผ่อนต่อ · กดปุ่ม "จัดการสัญญา" เพื่อบันทึกการจ่ายงวด
       </div>
     </div>
 
@@ -35373,7 +36505,66 @@ app.component('view-loanDashboard', {
         }).sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
     });
 
-    return { erp, db, fmt, kpi, upcomingDue, overdueList, today };
+    /* 🆕 V21 (2026-05-24): BSL DETAIL — per contract + monthly + payoff plan */
+    const bslContracts = computed(() => {
+      const loans = _trkSafe(db.loans).filter(l => l && l.status === 'Active' && (l.loanType === 'BSL' || l.loanType === 'Leasing' || l.loanType === 'Hire Purchase' || l.loanType === 'Finance Lease'));
+      return loans.map(l => {
+        const schedules = _trkSafe(db.loanSchedules).filter(s => s && s.loanId === l.id);
+        const totalDue = schedules.reduce((s,x) => s + Number(x.totalDueAmount||0), 0);
+        const paidAmount = schedules.reduce((s,x) => s + Number(x.paidAmount||0), 0);
+        const outstanding = Math.max(0, totalDue - paidAmount);
+        const paidCount = schedules.filter(s => s.paymentStatus === 'Paid').length;
+        const unpaidSchedules = schedules.filter(s => s.paymentStatus !== 'Paid' && s.paymentStatus !== 'Waived').sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+        const lastDueDate = schedules.length ? schedules.sort((a,b)=>(b.dueDate||'').localeCompare(a.dueDate||''))[0]?.dueDate : '';
+        const nextDue = unpaidSchedules[0];
+        const asset = l.linkedAssetId ? _trkSafe(db.assets).find(a => a && a.id === l.linkedAssetId) : null;
+        return {
+          loanId: l.id, loanNo: l.loanNo, contractNo: l.contractNo,
+          loanType: l.loanType, lenderName: l.lenderName,
+          assetId: asset?.id || '', assetCode: asset?.code || '', assetName: asset?.name || '(ไม่มี asset ผูก)',
+          installmentAmount: Number(l.installmentAmount||0),
+          installmentCount: Number(l.installmentCount||0),
+          financedAmount: Number(l.financedAmount||0),
+          paidCount, remainingCount: schedules.length - paidCount,
+          totalDue, paidAmount, outstanding,
+          nextDueDate: nextDue?.dueDate || '',
+          nextDueAmount: Number(nextDue?.totalDueAmount||0),
+          payoffDate: lastDueDate,    // วันสุดท้ายของงวดทั้งหมด
+        };
+      }).sort((a,b) => (a.payoffDate||'9999').localeCompare(b.payoffDate||'9999'));
+    });
+    const bslSummary = computed(() => {
+      const arr = bslContracts.value;
+      return {
+        count: arr.length,
+        totalOutstanding: arr.reduce((s,r)=>s+r.outstanding,0),
+        totalPaid: arr.reduce((s,r)=>s+r.paidAmount,0),
+        monthlyInstallment: arr.reduce((s,r)=>s+r.installmentAmount,0),
+        annualInstallment: arr.reduce((s,r)=>s+r.installmentAmount,0) * 12,
+        latestPayoffDate: arr.length ? arr[arr.length-1].payoffDate : '',
+      };
+    });
+    /* 🆕 Monthly cash flow forecast (next 24 months) — sum installments due each month */
+    const monthlyForecast = computed(() => {
+      const months = [];
+      const today_ = new Date(today);
+      for (let i = 0; i < 24; i++) {
+        const d = new Date(today_.getFullYear(), today_.getMonth() + i, 1);
+        const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+        let total = 0; let count = 0;
+        bslContracts.value.forEach(c => {
+          const unpaid = _trkSafe(db.loanSchedules).filter(s => s && s.loanId === c.loanId && s.paymentStatus !== 'Paid' && s.paymentStatus !== 'Waived' && (s.dueDate||'').slice(0,7) === ym);
+          unpaid.forEach(u => { total += Number(u.totalDueAmount||0); count++; });
+        });
+        months.push({ ym, total, count });
+      }
+      return months;
+    });
+
+    return { erp, db, fmt, kpi, upcomingDue, overdueList, today,
+      /* 🆕 V21 */ bslContracts, bslSummary, monthlyForecast,
+      goToAssets: () => { try { if (window._setView) window._setView('assetRegister'); } catch(e){} },
+      goToContracts: () => { try { if (window._setView) window._setView('loanContracts'); } catch(e){} } };
   },
   template:`
   <div class="space-y-4">
@@ -35537,6 +36728,86 @@ app.component('view-loanDashboard', {
               <tr v-if="!overdueList.length"><td colspan="4" class="text-center py-4 text-slate-400">ไม่มี ✓</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 V21 (2026-05-24): BSL / Leasing — Monthly Plan + Payoff -->
+    <div v-if="bslContracts.length > 0" class="bg-gradient-to-r from-violet-50 to-purple-50 border-l-4 border-violet-500 rounded-xl shadow p-4">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="text-lg font-bold text-violet-900">🏦 BSL / Leasing — งวดต่อเดือน + วางแผนปลดหนี้ ({{bslSummary.count}} สัญญา)</h3>
+        <button @click="goToAssets" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded text-xs font-bold">→ ดูทรัพย์สิน BSL</button>
+      </div>
+      <!-- BSL KPI -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        <div class="bg-white rounded-lg p-3 border border-violet-200">
+          <div class="text-xs text-slate-600">จำนวนสัญญา BSL</div>
+          <div class="text-lg font-bold text-violet-700">{{bslSummary.count}}</div>
+        </div>
+        <div class="bg-amber-50 rounded-lg p-3 border border-amber-300">
+          <div class="text-xs text-amber-700">💰 งวด/เดือน รวม</div>
+          <div class="text-lg font-bold text-amber-700">฿{{fmt(bslSummary.monthlyInstallment)}}</div>
+        </div>
+        <div class="bg-slate-50 rounded-lg p-3 border border-slate-300">
+          <div class="text-xs text-slate-600">💸 งวด/ปี รวม</div>
+          <div class="text-lg font-bold text-slate-700">฿{{fmt(bslSummary.annualInstallment)}}</div>
+        </div>
+        <div class="bg-red-50 rounded-lg p-3 border border-red-300">
+          <div class="text-xs text-red-700">หนี้คงเหลือรวม</div>
+          <div class="text-lg font-bold text-red-700">฿{{fmt(bslSummary.totalOutstanding)}}</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-300">
+          <div class="text-xs text-emerald-700">📅 หมดงวดสุดท้าย</div>
+          <div class="text-lg font-bold text-emerald-700">{{bslSummary.latestPayoffDate||'-'}}</div>
+        </div>
+      </div>
+      <!-- BSL Contracts table -->
+      <div class="bg-white rounded-lg overflow-x-auto mb-3">
+        <table class="w-full text-xs">
+          <thead class="bg-violet-100">
+            <tr>
+              <th class="p-2 text-left">เลขสัญญา</th>
+              <th class="p-2 text-left">ทรัพย์สิน</th>
+              <th class="p-2 text-left">Lender</th>
+              <th class="p-2 text-right">งวด/เดือน</th>
+              <th class="p-2 text-center">งวดที่เหลือ</th>
+              <th class="p-2 text-right text-red-700">คงค้าง</th>
+              <th class="p-2 text-left">งวดถัดไป</th>
+              <th class="p-2 text-left">หมดงวด</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in bslContracts" :key="r.loanId" class="border-t hover:bg-violet-50/40">
+              <td class="p-2 font-mono">{{r.contractNo}}<div class="text-[10px] text-slate-400">{{r.loanType}}</div></td>
+              <td class="p-2">{{r.assetName}}<div class="text-[10px] text-slate-400 font-mono">{{r.assetCode}}</div></td>
+              <td class="p-2 text-xs">{{r.lenderName}}</td>
+              <td class="p-2 text-right text-amber-700 font-bold">฿{{fmt(r.installmentAmount)}}</td>
+              <td class="p-2 text-center text-xs">{{r.remainingCount}}/{{r.installmentCount}}</td>
+              <td class="p-2 text-right text-red-700 font-bold">฿{{fmt(r.outstanding)}}</td>
+              <td class="p-2 text-xs">
+                <span v-if="r.nextDueDate">{{r.nextDueDate}}<br><span class="text-slate-400">฿{{fmt(r.nextDueAmount)}}</span></span>
+                <span v-else>-</span>
+              </td>
+              <td class="p-2 text-xs text-emerald-700 font-bold">{{r.payoffDate||'-'}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Monthly Forecast (next 24 months) -->
+      <div class="bg-white rounded-lg p-3">
+        <div class="text-xs font-bold text-violet-900 mb-2">📅 พยากรณ์งวดที่ต้องจ่ายราย 24 เดือนข้างหน้า (รวมทุก BSL)</div>
+        <div class="overflow-x-auto">
+          <div class="flex items-end gap-1 h-32">
+            <div v-for="m in monthlyForecast" :key="m.ym" class="flex-1 flex flex-col items-center gap-0.5" :title="m.ym+': ฿'+fmt(m.total)+' ('+m.count+' งวด)'">
+              <div class="text-[9px] text-slate-500" v-if="m.total>0">฿{{(m.total/1000).toFixed(0)}}k</div>
+              <div class="w-full bg-gradient-to-t from-violet-600 to-purple-500 rounded-t" :style="{height: monthlyForecast.length>0 ? Math.max((m.total / Math.max(...monthlyForecast.map(x=>x.total||1)) * 100), m.total>0?5:0) + '%' : '0%'}"></div>
+              <div class="text-[9px] text-slate-600 -rotate-45 origin-left whitespace-nowrap mt-3">{{m.ym.slice(5)}}/{{m.ym.slice(2,4)}}</div>
+            </div>
+          </div>
+        </div>
+        <div class="text-[10px] text-slate-500 italic mt-3">
+          💡 หนี้ BSL/Leasing ทั้งหมดจะหมดเมื่อ <b class="text-emerald-700">{{bslSummary.latestPayoffDate||'-'}}</b> · งวดสูงสุดในกราฟ = ฿{{fmt(Math.max(...monthlyForecast.map(x=>x.total)))}}
         </div>
       </div>
     </div>
@@ -51459,17 +52730,55 @@ app.component('view-anomalyDetector', {
       return out.sort((a,b) => (order[a.severity]||3) - (order[b.severity]||3));
     });
 
+    /* 🆕 V20 (2026-05-24): Dismissed anomalies — เก็บใน localStorage (ไม่กระทบ db sync) */
+    const DISMISS_KEY = 'ns_erp_dismissed_anomalies';
+    function _loadDismissed() {
+      try { return new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]')); }
+      catch(e) { return new Set(); }
+    }
+    const dismissedIds = ref(_loadDismissed());
+    const showDismissed = ref(false);
+    function dismissAnomaly(id) {
+      dismissedIds.value.add(id);
+      dismissedIds.value = new Set(dismissedIds.value);   // trigger reactivity
+      try { localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(dismissedIds.value))); } catch(e){}
+      if (erp.showToast) erp.showToast('🗑 ลบทิ้งการเตือนแล้ว — กดปุ่ม "แสดงที่ลบทิ้ง" เพื่อย้อนกลับ', 'info');
+    }
+    function dismissGroup(items) {
+      items.forEach(a => dismissedIds.value.add(a.id));
+      dismissedIds.value = new Set(dismissedIds.value);
+      try { localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(dismissedIds.value))); } catch(e){}
+      if (erp.showToast) erp.showToast('🗑 ลบทิ้งทั้งกลุ่ม ('+items.length+' รายการ)', 'info');
+    }
+    function restoreAnomaly(id) {
+      dismissedIds.value.delete(id);
+      dismissedIds.value = new Set(dismissedIds.value);
+      try { localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(dismissedIds.value))); } catch(e){}
+    }
+    function restoreAll() {
+      if (!confirm('คืนค่าการเตือนที่ลบทิ้งทั้งหมด ('+dismissedIds.value.size+' รายการ)?')) return;
+      dismissedIds.value = new Set();
+      try { localStorage.removeItem(DISMISS_KEY); } catch(e){}
+      if (erp.showToast) erp.showToast('✓ คืนค่าการเตือนทั้งหมดแล้ว', 'success');
+    }
+
+    /* 🆕 V20: anomalies ที่ active (ไม่ถูก dismiss) — ใช้แสดงผล */
+    const activeAnomalies = computed(() => anomalies.value.filter(a => !dismissedIds.value.has(a.id)));
+    const dismissedAnomalies = computed(() => anomalies.value.filter(a => dismissedIds.value.has(a.id)));
+
     const filtered = computed(() => {
-      if (!filterSeverity.value) return anomalies.value;
-      return anomalies.value.filter(a => a.severity === filterSeverity.value);
+      const src = showDismissed.value ? dismissedAnomalies.value : activeAnomalies.value;
+      if (!filterSeverity.value) return src;
+      return src.filter(a => a.severity === filterSeverity.value);
     });
 
     const stats = computed(() => ({
-      total: anomalies.value.length,
-      critical: anomalies.value.filter(a=>a.severity==='critical').length,
-      warn: anomalies.value.filter(a=>a.severity==='warn').length,
-      info: anomalies.value.filter(a=>a.severity==='info').length,
-      byCategory: Array.from(anomalies.value.reduce((m,a) => {
+      total: activeAnomalies.value.length,
+      critical: activeAnomalies.value.filter(a=>a.severity==='critical').length,
+      warn: activeAnomalies.value.filter(a=>a.severity==='warn').length,
+      info: activeAnomalies.value.filter(a=>a.severity==='info').length,
+      dismissed: dismissedAnomalies.value.length,
+      byCategory: Array.from(activeAnomalies.value.reduce((m,a) => {
         m.set(a.category, (m.get(a.category)||0)+1); return m;
       }, new Map()).entries()).map(([k,v]) => ({cat:k, count:v})).sort((a,b)=>b.count-a.count),
     }));
@@ -51669,7 +52978,10 @@ app.component('view-anomalyDetector', {
     return { erp, db, fmt, today, anomalies, filtered, stats, filterSeverity,
       grouped, expandedGroups, toggleGroup, expandAll, collapseAll,
       // 🆕 Jump-to-bill
-      jumpFromAnomaly, getJumpInfo };
+      jumpFromAnomaly, getJumpInfo,
+      // 🆕 V20: Dismissable
+      dismissedIds, showDismissed, dismissAnomaly, dismissGroup, restoreAnomaly, restoreAll,
+      activeAnomalies, dismissedAnomalies };
   },
   template: `
   <div class="space-y-4">
@@ -51705,15 +53017,30 @@ app.component('view-anomalyDetector', {
       </div>
     </div>
 
-    <!-- 🎉 No anomalies -->
-    <div v-if="!anomalies.length" class="bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl shadow-lg p-12 text-center">
+    <!-- 🎉 No anomalies (active) -->
+    <div v-if="!activeAnomalies.length && !showDismissed" class="bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl shadow-lg p-12 text-center">
       <div class="text-7xl mb-4">✅</div>
-      <h2 class="text-2xl font-bold text-emerald-700 mb-2">ทุกอย่างปกติ!</h2>
-      <p class="text-slate-600">ระบบไม่พบความผิดปกติใดๆ — เก่งมาก 🎉</p>
+      <h2 class="text-2xl font-bold text-emerald-700 mb-2">ทุกอย่างปกติ ไม่มีอะไรต้องเช็ค</h2>
+      <p class="text-slate-600">ระบบสแกนทุกตัวเลขแล้ว — ไม่พบจุดผิดปกติใดๆ 🎉</p>
+      <p v-if="stats.dismissed > 0" class="text-xs text-slate-500 mt-3">
+        🗑 มีการเตือนที่ถูกลบทิ้ง {{stats.dismissed}} รายการ —
+        <button @click="showDismissed=true" class="text-blue-600 underline ml-1">ดูที่ลบทิ้ง</button>
+      </p>
+    </div>
+
+    <!-- 🆕 V20: Dismissed toggle bar -->
+    <div v-if="anomalies.length" class="bg-white rounded-xl shadow p-3 flex flex-wrap items-center gap-3">
+      <button @click="showDismissed = !showDismissed" :class="['px-3 py-1.5 rounded text-xs font-bold', showDismissed?'bg-amber-500 text-white':'bg-slate-100 text-slate-700']">
+        {{showDismissed ? '⬅ กลับไปดูที่ active' : '🗑 ดูที่ลบทิ้ง ('+stats.dismissed+')'}}
+      </button>
+      <span v-if="showDismissed" class="text-sm text-amber-700 font-bold">🗑 กำลังดูการเตือนที่ลบทิ้ง — กดปุ่ม "↩ คืนค่า" เพื่อย้อนกลับ</span>
+      <button v-if="showDismissed && stats.dismissed > 0" @click="restoreAll" class="ml-auto px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold">
+        ↩ คืนค่าทั้งหมด ({{stats.dismissed}})
+      </button>
     </div>
 
     <!-- 📂 By Category Tags -->
-    <div v-if="anomalies.length" class="bg-white rounded-xl shadow p-3 flex flex-wrap items-center gap-2">
+    <div v-if="anomalies.length && !showDismissed" class="bg-white rounded-xl shadow p-3 flex flex-wrap items-center gap-2">
       <span class="text-xs text-slate-500 font-bold">📂 หมวด:</span>
       <span v-for="c in stats.byCategory" :key="c.cat" class="bg-slate-100 rounded-full px-3 py-1 text-xs font-medium text-slate-700">
         {{c.cat}} <b class="text-red-600">{{c.count}}</b>
@@ -51726,7 +53053,7 @@ app.component('view-anomalyDetector', {
         <button @click="expandAll" class="text-xs text-blue-600 hover:underline">▽ ขยายทั้งหมด</button>
         <button @click="collapseAll" class="text-xs text-slate-600 hover:underline">▲ ย่อทั้งหมด</button>
       </div>
-      <div v-for="g in grouped" :key="g.key" :class="['rounded-xl shadow border-l-4 transition', g.severity==='critical'?'bg-red-50 border-red-600':g.severity==='warn'?'bg-amber-50 border-amber-500':'bg-blue-50 border-blue-500']">
+      <div v-for="g in grouped" :key="g.key" :class="['rounded-xl shadow border-l-4 transition', g.severity==='critical'?'bg-red-50 border-red-600':g.severity==='warn'?'bg-amber-50 border-amber-500':'bg-blue-50 border-blue-500', showDismissed?'opacity-70':'']">
         <!-- Group Header (clickable) -->
         <div class="p-3 cursor-pointer flex items-center gap-3 hover:bg-white/40" @click="toggleGroup(g.key)">
           <span class="text-2xl">{{g.icon}}</span>
@@ -51736,7 +53063,11 @@ app.component('view-anomalyDetector', {
               <span class="text-xs text-slate-500">📂 {{g.category}}</span>
               <span :class="['font-bold', g.severity==='critical'?'text-red-800':g.severity==='warn'?'text-amber-800':'text-blue-800']">{{g.label}}</span>
               <span :class="['ml-auto text-2xl font-bold', g.severity==='critical'?'text-red-700':g.severity==='warn'?'text-amber-700':'text-blue-700']">{{g.items.length}}</span>
-              <span class="text-xs text-slate-500">{{g.items.length>1?'รายการ':'รายการ'}}</span>
+              <span class="text-xs text-slate-500">รายการ</span>
+              <!-- 🆕 V20: ปุ่มลบทิ้งทั้งกลุ่ม -->
+              <button v-if="!showDismissed" @click.stop="dismissGroup(g.items)" class="px-2 py-0.5 bg-slate-500 hover:bg-slate-600 text-white rounded text-[10px] font-bold whitespace-nowrap" title="ลบทิ้งการเตือนทั้งกลุ่มนี้">
+                🗑 ลบทิ้งทั้งกลุ่ม
+              </button>
             </div>
           </div>
           <span class="text-xl text-slate-400">{{expandedGroups[g.key] ? '▲' : '▼'}}</span>
@@ -51749,14 +53080,23 @@ app.component('view-anomalyDetector', {
               <div class="flex-1 min-w-[280px]">
                 <div class="font-semibold text-sm" :class="g.severity==='critical'?'text-red-800':g.severity==='warn'?'text-amber-800':'text-blue-800'">{{a.title}}</div>
                 <div class="text-xs text-slate-700 mt-0.5">{{a.detail}}</div>
-                <div class="text-xs text-slate-500 italic mt-1">💡 <b>แนะนำ:</b> {{a.action}}</div>
+                <div class="text-xs text-slate-500 italic mt-1">💡 <b>วิธีแก้:</b> {{a.action}}</div>
               </div>
-              <!-- 🆕 ปุ่มไปแก้ — แสดงเฉพาะถ้าหา bill เจอ -->
-              <button v-if="getJumpInfo(a)" @click="jumpFromAnomaly(a)"
-                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap shadow flex items-center gap-1"
-                :title="'ไปเปิด '+getJumpInfo(a).label+' '+getJumpInfo(a).displayNo">
-                ✏️ ไปแก้ {{getJumpInfo(a).displayNo}}
-              </button>
+              <div class="flex gap-1 items-start">
+                <!-- 🆕 ปุ่มไปแก้ — แสดงเฉพาะถ้าหา bill เจอ -->
+                <button v-if="getJumpInfo(a) && !showDismissed" @click="jumpFromAnomaly(a)"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap shadow flex items-center gap-1"
+                  :title="'ไปเปิด '+getJumpInfo(a).label+' '+getJumpInfo(a).displayNo">
+                  ✏️ ไปแก้ {{getJumpInfo(a).displayNo}}
+                </button>
+                <!-- 🆕 V20: ปุ่มลบทิ้งรายตัว / คืนค่า -->
+                <button v-if="!showDismissed" @click="dismissAnomaly(a.id)" class="bg-slate-400 hover:bg-slate-500 text-white px-3 py-1.5 rounded text-xs font-bold" title="ลบทิ้งการเตือนนี้ (ไม่ต้องแก้ไข)">
+                  🗑 ลบทิ้ง
+                </button>
+                <button v-else @click="restoreAnomaly(a.id)" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-bold" title="คืนค่ากลับไป active">
+                  ↩ คืนค่า
+                </button>
+              </div>
             </div>
           </div>
         </div>
