@@ -6149,6 +6149,40 @@ window.$erp = {
   },
   poSellMatchedQty: (poSellId) => _safeArr(_GLOBAL_DB.matchLogs).filter(m => m && m.po_sell_id === poSellId && m.status !== 'reversed').reduce((s,m)=>s+Number(m.qty_used||0),0),
   poSellMatchedCost: (poSellId) => _safeArr(_GLOBAL_DB.matchLogs).filter(m => m && m.po_sell_id === poSellId && m.status !== 'reversed').reduce((s,m)=>s+Number(m.total_cost||0),0),
+  /* 🆕 V10 (2026-05-24): จำนวนที่ "ส่งจริง" ใน Sales Bill — รองรับทั้ง multi-PO และ legacy */
+  poSellDeliveredQty: (poSellId) => {
+    try {
+      let total = 0;
+      _safeArr(_GLOBAL_DB.salesBills).forEach(b => {
+        if (!b || b.status === 'cancelled') return;
+        (b.items||[]).forEach(it => {
+          if (Array.isArray(it.poLinks) && it.poLinks.length > 0) {
+            it.poLinks.forEach(lk => { if (lk && lk.poSellId === poSellId) total += Number(lk.qty||0); });
+          } else if (b.salesSource === 'PO_DELIVERY' && b.poSellId === poSellId) {
+            total += Number(it.weight||it.netWeight||0);
+          }
+        });
+      });
+      return total;
+    } catch(e) { return 0; }
+  },
+  poSellRemainingDelivery: (poSellId) => {
+    const po = _safeFind(_GLOBAL_DB.poSells, poSellId);
+    if (!po) return 0;
+    const target = Number(po.qty||0);
+    let delivered = 0;
+    _safeArr(_GLOBAL_DB.salesBills).forEach(b => {
+      if (!b || b.status === 'cancelled') return;
+      (b.items||[]).forEach(it => {
+        if (Array.isArray(it.poLinks) && it.poLinks.length > 0) {
+          it.poLinks.forEach(lk => { if (lk && lk.poSellId === poSellId) delivered += Number(lk.qty||0); });
+        } else if (b.salesSource === 'PO_DELIVERY' && b.poSellId === poSellId) {
+          delivered += Number(it.weight||it.netWeight||0);
+        }
+      });
+    });
+    return Math.max(0, target - delivered);
+  },
 
   /* ============== FINANCE / ASSET / LOAN HELPERS ============== */
   /* Asset NBV = original cost - accumulated depreciation */
@@ -8881,8 +8915,9 @@ const app = createApp({
         {view:'dailyReport', label:'📰 Daily Report (รายงานประจำวัน)', icon:'📰'},
         {view:'dashboard', label:'Dashboard', icon:'📊'},
         {view:'profitCostAnalysis', label:'Profit & Cost Analysis', icon:'💎'},
-        {view:'pendingSales', label:'รายการรอขาย', icon:'⏰'},
-        {view:'salesPlan', label:'📋 วางแผนการขาย (LME)', icon:'📋'},
+        {view:'pendingSales', label:'รายการรอขาย + วางแผนการขาย (LME)', icon:'⏰'},
+        {view:'stockPlanning', label:'📅 วางแผนสต๊อก vs PO Sell', icon:'📅'},   /* 🆕 V12 */
+        /* 🆕 V11: salesPlan menu ถูกรวมเข้า pendingSales แล้ว — เก็บ view เก่าไว้ (เผื่อ deep link) */
         {view:'salesCommission', label:'💼 Sales Tracking Dashboard', icon:'💼'},
         {view:'cashFlowCalendar', label:'Cash Flow Calendar', icon:'📅'},
         {view:'businessCalendar', label:'Business Calendar', icon:'🗓️'},
@@ -8914,22 +8949,19 @@ const app = createApp({
         {view:'productionDashboard', label:'📊 Production Dashboard', icon:'📊'},
         {view:'wipReport', label:'WIP คงเหลือ', icon:'⏳'},
         {view:'productionReport', label:'รายงานการผลิต / Yield', icon:'📐'},
-        {view:'productionCostReport', label:'Production Cost Report', icon:'💴'},
         {view:'yieldLossReport', label:'Yield/Loss + Abnormal', icon:'📉'},
-        {view:'machineUtil', label:'Machine Utilization', icon:'⚙️'},
+        /* 🆕 V15 (2026-05-24): ลบ productionCostReport + machineUtil ออกจากเมนู — component ยังอยู่เผื่อ deep link */
       ]},
       { label:'Dual Costing (จองดีล)', items:[
         {view:'poBuy', label:'PO Buy (จองซื้อ)', icon:'📝'},
         {view:'poSell', label:'PO Sell (จองขาย)', icon:'📃'},
         {view:'costPool', label:'Cost Pool', icon:'🪣'},
         {view:'costAllocator', label:'Cost Allocator (ทอง/เหลือง)', icon:'🎯'},
-        {view:'waitingAllocations', label:'Waiting Allocations (รวม Grade Adj.)', icon:'⏳'},
+        {view:'waitingAllocations', label:'Waiting Allocations', icon:'⏳'},
         {view:'gradeAdjustment', label:'Grade Adjustment / ปรับเกรด', icon:'🔀'},
         {view:'costAllocationLedger', label:'Allocation Ledger', icon:'📒'},
-        {view:'dualCostingReport', label:'Dual Costing Report', icon:'📊'},
-        {view:'matchLog', label:'Match Log', icon:'🔗'},
         {view:'dealMargin', label:'Deal Margin Report', icon:'💎'},
-        {view:'compareMargin', label:'Compare Deal vs Stock', icon:'⚖️'},
+        /* 🆕 V14 (2026-05-24): ลบ matchLog / dualCostingReport / compareMargin ออกจากเมนู — component ยังคงอยู่เผื่อ deep link */
       ]},
       { label:'การเงิน & หนี้', items:[
         {view:'ar', label:'ลูกหนี้ (AR)', icon:'📈'},
@@ -9200,6 +9232,36 @@ const app = createApp({
     function poSellMatchedCost(poSellId) {
       return db.matchLogs.filter(m => m.po_sell_id === poSellId && m.status !== 'reversed')
         .reduce((s,m) => s + Number(m.total_cost||0), 0);
+    }
+    /* 🆕 V10 (2026-05-24): จำนวนที่ "ส่งจริง" ใน Sales Bill — รองรับทั้ง multi-PO (item.poLinks) และ legacy (bill.poSellId) */
+    function poSellDeliveredQty(poSellId) {
+      try {
+        if (!Array.isArray(db.salesBills)) return 0;
+        let total = 0;
+        db.salesBills.forEach(b => {
+          if (!b || b.status === 'cancelled') return;
+          (b.items||[]).forEach(it => {
+            // Priority: per-item poLinks (multi-PO support)
+            if (Array.isArray(it.poLinks) && it.poLinks.length > 0) {
+              it.poLinks.forEach(lk => {
+                if (lk && lk.poSellId === poSellId) total += Number(lk.qty||0);
+              });
+            } else if (b.salesSource === 'PO_DELIVERY' && b.poSellId === poSellId) {
+              // Legacy: bill-level poSellId, sum entire item weight
+              total += Number(it.weight||it.netWeight||0);
+            }
+          });
+        });
+        return total;
+      } catch(e) { console.warn('[poSellDeliveredQty]', e); return 0; }
+    }
+    /* 🆕 V10: เหลือต้องส่ง (qty − delivered จริงจาก SB) */
+    function poSellRemainingDelivery(poSellId) {
+      const po = (db.poSells||[]).find(p => p && p.id === poSellId);
+      if (!po) return 0;
+      const target = Number(po.qty||0);
+      const delivered = poSellDeliveredQty(poSellId);
+      return Math.max(0, target - delivered);
     }
 
     /* ===== INTL FINANCE HELPERS ===== */
@@ -13962,6 +14024,8 @@ app.component('view-purchase', {
             docNo: p.docNo || '-',
             supplier: supplierName(p.supplierId),
             product: productName(p.productId),
+            productId: p.productId,
+            items: (p.items||[]),
             remaining: num(p.remainingQty || p.qty),
             unitPrice: num(p.unitPrice),
             label: (p.docNo||'-') + ' | ' + supplierName(p.supplierId) + ' | ' + productName(p.productId) + ' | คงเหลือ ' + fmt(num(p.remainingQty || p.qty)) + ' กก.',
@@ -13969,6 +14033,18 @@ app.component('view-purchase', {
           }));
       } catch (e) { return []; }
     });
+    /* 🆕 V13 (2026-05-24): Filter PO Buys by item.productId — เลือกสินค้าก่อน แล้ว PO ค่อย dropdown */
+    function availablePOBuysForItem(it) {
+      try {
+        if (!it || !it.productId) return [];
+        return availablePOBuys.value.filter(po => {
+          // ตรงสินค้า: root productId หรือ items[]
+          if (po.productId === it.productId) return true;
+          if ((po.items||[]).some(pi => pi && pi.productId === it.productId)) return true;
+          return false;
+        });
+      } catch (e) { return []; }
+    }
 
     /* When user selects PO Buy → auto-fill form fields */
     function loadFromPO() {
@@ -14908,7 +14984,7 @@ app.component('view-purchase', {
       supplierSearchTerm, filteredSuppliers, onSupplierPicked, quickAddSupplier,
       addItem, removeItem, recalcItem, onGrossOrTareChange, onNetChange,
       fmt, supplierName, branchName, channelName, accountName, productName,
-      availablePOBuys, loadFromPO, setSource,
+      availablePOBuys, availablePOBuysForItem, loadFromPO, setSource,
       // Swap
       showSwapModal, swapTarget, swapForm, swapTotals, openSwapSupplier, recalcSwapLine, saveSupplierSwap,
       // Bank account
@@ -15242,10 +15318,19 @@ app.component('view-purchase', {
                       <input type="text" v-model="it.displayName" :placeholder="it.productId ? '📝 ชื่อสำหรับโชว์ในบิล (ว่าง = ใช้ชื่อ Master)' : 'เลือกสินค้าก่อน...'" class="w-full px-2 py-1 border rounded text-xs mt-1.5 bg-yellow-50">
                     </td>
                     <td class="p-2">
-                      <select v-model="it.poBuyId" :class="['w-full px-2 py-1.5 border rounded text-xs', it.poBuyId ? 'bg-indigo-50 border-indigo-300 font-medium' : 'bg-blue-50 border-blue-200']">
-                        <option value="">📦 Spot Buy</option>
-                        <option v-for="po in availablePOBuys" :key="po.id" :value="po.id">📋 {{po.label}}</option>
-                      </select>
+                      <!-- 🆕 V13: เลือกสินค้าก่อน → ถ้ามี PO ของสินค้านั้นค่อยขึ้น dropdown -->
+                      <template v-if="!it.productId">
+                        <div class="text-[10px] text-slate-400 italic px-1">เลือกสินค้าก่อน</div>
+                      </template>
+                      <template v-else-if="availablePOBuysForItem(it).length === 0">
+                        <div class="text-[10px] text-blue-600 px-1 py-1.5 bg-blue-50 rounded border border-blue-200">📦 Spot Buy<br/><span class="text-slate-500">(ไม่มี PO ค้าง)</span></div>
+                      </template>
+                      <template v-else>
+                        <select v-model="it.poBuyId" :class="['w-full px-2 py-1.5 border rounded text-xs', it.poBuyId ? 'bg-indigo-50 border-indigo-300 font-medium' : 'bg-blue-50 border-blue-200']">
+                          <option value="">📦 Spot Buy</option>
+                          <option v-for="po in availablePOBuysForItem(it)" :key="po.id" :value="po.id">📋 {{po.label}}</option>
+                        </select>
+                      </template>
                     </td>
                     <!-- 🆕 คงเหลือ/หลังรับ — ย้ายเป็น column แยก ขนาดกะทัดรัด -->
                     <td class="p-1 text-center bg-emerald-50/60">
@@ -15462,7 +15547,11 @@ app.component('view-payment', {
 
     function emptyLine() {
       return { id: newId('PML'), billId: '', supplierId: '', supplierName: '', outstanding: 0,
-        paymentAmount: 0, withholdingTax: 0, discount: 0, bankFee: 0 };
+        paymentAmount: 0, withholdingTax: 0, discount: 0, bankFee: 0,
+        /* 🆕 V15 (2026-05-24): Supplier advance deduction */
+        advanceDeduct: 0,                  // จำนวนที่หักจากเงินมัจำ (THB)
+        advanceAllocations: []             // [{advanceId, amount}] — track ว่าใช้ advance ตัวไหนบ้าง
+      };
     }
     function makeBlankForm() {
       return {
@@ -15553,18 +15642,23 @@ app.component('view-payment', {
           accountId: first.accountId || '',
           method: first.method || 'โอน',
           notes: first.notes || '',
-          lines: rows.map(p => {
+          lines: rows.map((p, ridx) => {
             const bill = safeArr(db.purchaseBills).find(b => b && b.id === p.billId);
+            /* 🆕 V15: หา advance allocations ที่ผูกกับ payment line นี้ */
+            const advAllocs = safeArr(db.advanceAllocations).filter(x => x && x.paymentVoucherId === g.id && x.paymentLineIdx === ridx);
             return {
               id: newId('PML'),
               billId: p.billId,
               supplierId: p.supplierId || '',
               supplierName: erp.supplierName ? erp.supplierName(p.supplierId) : '-',
-              outstanding: bill ? num(bill.payableBalance) + num(p.amount) + num(p.withholdingTax) + num(p.discount) : num(p.amount),
+              outstanding: bill ? num(bill.payableBalance) + num(p.amount) + num(p.withholdingTax) + num(p.discount) + num(p.advanceDeduct) : num(p.amount),
               paymentAmount: num(p.amount),
               withholdingTax: num(p.withholdingTax),
               discount: num(p.discount),
-              bankFee: num(p.bankFee)
+              bankFee: num(p.bankFee),
+              /* 🆕 V15 */
+              advanceDeduct: num(p.advanceDeduct),
+              advanceAllocations: advAllocs.map(a => ({ advanceId: a.advanceId, advanceDocNo: a.advanceDocNo||'', amount: Number(a.amount||0) }))
             };
           }),
           splits: loadedSplits
@@ -15588,8 +15682,61 @@ app.component('view-payment', {
           line.supplierId = bill.supplierId || '';
           line.supplierName = erp.supplierName(bill.supplierId);
           if (num(line.paymentAmount) === 0) line.paymentAmount = num(bill.payableBalance);
+          /* 🆕 V15: ตรวจ supplier advance ทันทีที่ pick bill */
+          // ไม่ auto-deduct — แค่ทำให้ field พร้อม + ให้ user เห็นแจ้งเตือนใน template
+          if (!Array.isArray(line.advanceAllocations)) line.advanceAllocations = [];
+          if (!num(line.advanceDeduct)) line.advanceDeduct = 0;
         }
       } catch (e) { console.error(e); }
+    }
+
+    /* 🆕 V15 (2026-05-24): SUPPLIER ADVANCE HELPERS */
+    function supplierAdvanceList(supplierId) {
+      if (!supplierId) return [];
+      try {
+        return safeArr(db.supplierAdvances).filter(a => a && a.supplierId === supplierId && a.status !== 'Cancelled')
+          .map(a => {
+            const used = safeArr(db.advanceAllocations).filter(x => x && x.advanceId === a.id && x.advanceType === 'Supplier').reduce((s,x)=>s+Number(x.amount||0),0);
+            const remaining = Math.max(0, Number(a.advanceAmountTHB||0) - used);
+            return { ...a, used, remaining };
+          })
+          .filter(a => a.remaining > 0.01)
+          .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      } catch(e) { return []; }
+    }
+    function supplierAdvanceTotalRemain(supplierId) {
+      return supplierAdvanceList(supplierId).reduce((s,a) => s + a.remaining, 0);
+    }
+    function applyAdvanceDeduct(line) {
+      try {
+        const supId = line.supplierId;
+        if (!supId) { alert('เลือกบิลก่อน'); return; }
+        const advances = supplierAdvanceList(supId);
+        if (!advances.length) { alert('Supplier นี้ไม่มีเงินมัจำคงเหลือ'); return; }
+        const billPayable = num(line.paymentAmount) + num(line.advanceDeduct);  // recover original
+        const totalAvailable = advances.reduce((s,a)=>s+a.remaining, 0);
+        const toDeduct = Math.min(totalAvailable, billPayable);
+        // กระจายแบบ FIFO — ใช้ advance เก่าก่อน
+        const allocs = [];
+        let remaining = toDeduct;
+        for (const a of advances) {
+          if (remaining <= 0.01) break;
+          const use = Math.min(a.remaining, remaining);
+          allocs.push({ advanceId: a.id, advanceDocNo: a.docNo, amount: use });
+          remaining -= use;
+        }
+        line.advanceAllocations = allocs;
+        line.advanceDeduct = toDeduct;
+        line.paymentAmount = Math.max(0, billPayable - toDeduct);
+        erp.showToast('✓ หักเงินมัจำ ฿'+toDeduct.toLocaleString('th-TH', {minimumFractionDigits:2,maximumFractionDigits:2})+' — เหลือจ่ายจริง ฿'+line.paymentAmount.toLocaleString('th-TH', {minimumFractionDigits:2,maximumFractionDigits:2}), 'success');
+      } catch(e) { console.error('[applyAdvanceDeduct]', e); alert('Error: '+e.message); }
+    }
+    function clearAdvanceDeduct(line) {
+      const wasDeducted = num(line.advanceDeduct);
+      line.advanceDeduct = 0;
+      line.advanceAllocations = [];
+      line.paymentAmount = num(line.paymentAmount) + wasDeducted;
+      erp.showToast('↩ คืนเงินมัจำ ฿'+wasDeducted.toLocaleString('th-TH'),'info');
     }
 
     /* Computed totals — defensive */
@@ -15702,7 +15849,8 @@ app.component('view-payment', {
           oldRows.forEach(p => {
             const bill = safeArr(db.purchaseBills).find(b => b && b.id === p.billId);
             if (bill) {
-              const oldAllocated = num(p.amount) + num(p.withholdingTax) + num(p.discount);
+              /* 🆕 V15: รวม advanceDeduct ใน old allocated เพื่อ unwind ครบ */
+              const oldAllocated = num(p.amount) + num(p.withholdingTax) + num(p.discount) + num(p.advanceDeduct);
               bill.paidAmount = Math.max(0, num(bill.paidAmount) - oldAllocated);
               bill.payableBalance = Math.max(0, num(bill.totalAmount) - bill.paidAmount);
               bill.status = bill.paidAmount <= 0 ? 'unpaid' : (bill.payableBalance <= 0 ? 'paid' : 'partial');
@@ -15713,6 +15861,10 @@ app.component('view-payment', {
           // Remove old payments + bank statement entries
           db.payments = safeArr(db.payments).filter(p => p && (p.voucherId || p.id) !== voucherId);
           db.bankStatement = safeArr(db.bankStatement).filter(s => !(s && s.refType === 'PMT' && s.refId === voucherId));
+          /* 🆕 V15: ลบ advance allocations เก่าของ voucher นี้ — จะเขียนใหม่ตาม validLines ปัจจุบัน */
+          if (Array.isArray(db.advanceAllocations)) {
+            db.advanceAllocations = db.advanceAllocations.filter(x => !(x && x.paymentVoucherId === voucherId));
+          }
         }
 
         // Apply new effects
@@ -15729,6 +15881,14 @@ app.component('view-payment', {
             if (bill.supplierId) supplierNames.add(erp.supplierName(bill.supplierId));
           }
           const billSupplierId = bill?.supplierId || line.supplierId || '';
+          /* 🆕 V15: หักจาก paidAmount = paymentAmount + advanceDeduct + WHT + discount */
+          const advanceDeduct = num(line.advanceDeduct);
+          if (bill && advanceDeduct > 0) {
+            // เพิ่ม advanceDeduct เข้า paidAmount ด้วย (เพราะ advance ก็ถือเป็นการ "จ่าย")
+            bill.paidAmount = num(bill.paidAmount) + advanceDeduct;
+            bill.payableBalance = Math.max(0, num(bill.totalAmount) - bill.paidAmount);
+            bill.status = bill.payableBalance <= 0 ? 'paid' : 'partial';
+          }
           db.payments.push({
             // 🔧 Deterministic id: PMT-L-{voucherId}-{idx} — แก้กี่ครั้งก็ upsert ทับ ไม่สะสม dup
             id: 'PMT-L-' + voucherId + '-' + idx,
@@ -15736,11 +15896,32 @@ app.component('view-payment', {
             supplierId: billSupplierId, billId: line.billId,
             amount: num(line.paymentAmount), withholdingTax: num(line.withholdingTax),
             discount: num(line.discount), bankFee: num(line.bankFee),
+            advanceDeduct,                          // 🆕 V15: track ไว้ที่ payment line
             accountId: f.accountId, method: f.method, notes: f.notes,
             branchId: f.branchId,
             createdBy: erp.currentUser.value?.username || '-',
             updatedAt: new Date().toISOString()
           });
+          /* 🆕 V15: บันทึก advanceAllocations entries */
+          if (advanceDeduct > 0 && Array.isArray(line.advanceAllocations)) {
+            if (!Array.isArray(db.advanceAllocations)) db.advanceAllocations = [];
+            // ลบของเก่าที่อ้าง paymentId นี้ (กรณี edit)
+            db.advanceAllocations = db.advanceAllocations.filter(x => !(x && x.paymentVoucherId === voucherId && x.paymentLineIdx === idx));
+            line.advanceAllocations.forEach((al, alIdx) => {
+              db.advanceAllocations.push({
+                id: 'AA-PMT-'+voucherId+'-'+idx+'-'+alIdx,
+                advanceType: 'Supplier',
+                advanceId: al.advanceId,
+                advanceDocNo: al.advanceDocNo || '',
+                paymentVoucherId: voucherId,
+                paymentLineIdx: idx,
+                billId: line.billId,
+                amount: Number(al.amount||0),
+                date: f.date,
+                createdBy: erp.currentUser.value?.username || '-',
+              });
+            });
+          }
         });
         const supplierLabel = Array.from(supplierNames).join(', ').slice(0,80) || 'หลายราย';
         // 🆕 Split-aware bank statement: 1 entry per account
@@ -15847,13 +16028,14 @@ app.component('view-payment', {
     });
 
     async function remove(g) {
-      if (!confirm('ลบ ' + g.docNo + ' ?\n• คืนยอด AP กลับ\n• ลบ bank statement entry\n• ลบทั้ง Local + Cloud')) return;
+      if (!confirm('ลบ ' + g.docNo + ' ?\n• คืนยอด AP กลับ\n• คืนเงินมัจำ (ถ้าหักไว้)\n• ลบ bank statement entry\n• ลบทั้ง Local + Cloud')) return;
       const rows = safeArr(db.payments).filter(p => p && (p.voucherId || p.id) === g.id);
       const paymentIds = rows.map(p => p.id);
       rows.forEach(p => {
         const bill = safeArr(db.purchaseBills).find(b => b && b.id === p.billId);
         if (bill) {
-          const allocated = num(p.amount) + num(p.withholdingTax) + num(p.discount);
+          /* 🆕 V15: รวม advanceDeduct ใน allocated เพื่อ unwind ครบ */
+          const allocated = num(p.amount) + num(p.withholdingTax) + num(p.discount) + num(p.advanceDeduct);
           bill.paidAmount = Math.max(0, num(bill.paidAmount) - allocated);
           bill.payableBalance = Math.max(0, num(bill.totalAmount) - bill.paidAmount);
           bill.status = bill.paidAmount <= 0 ? 'unpaid' : (bill.payableBalance <= 0 ? 'paid' : 'partial');
@@ -15864,6 +16046,10 @@ app.component('view-payment', {
       const bsIds = db.bankStatement.filter(s => s.refType === 'PMT' && s.refId === g.id).map(s => s.id);
       db.payments = db.payments.filter(p => (p.voucherId || p.id) !== g.id);
       db.bankStatement = db.bankStatement.filter(s => !(s.refType === 'PMT' && s.refId === g.id));
+      /* 🆕 V15: ลบ advance allocations ของ voucher นี้ — คืน advance balance */
+      if (Array.isArray(db.advanceAllocations)) {
+        db.advanceAllocations = db.advanceAllocations.filter(x => !(x && x.paymentVoucherId === g.id));
+      }
       // 🆕 ลบ Cloud
       if (paymentIds.length) await erp.deleteCloud('payments', paymentIds);
       if (bsIds.length) await erp.deleteCloud('bankStatement', bsIds);
@@ -15965,6 +16151,8 @@ app.component('view-payment', {
     return { db, erp, form, showForm, search, filterDateFrom, filterDateTo, filterAccount, list, totals, num, editingVoucherId,
       open, openEdit, close: close_, save, remove, addLine, removeLine, pickBill, availableBills,
       getBillDisplay, onBillTyped, actualPayable: _actualPayable, fmt: erp.fmt,
+      // 🆕 V15 (2026-05-24): Supplier Advance deduct
+      supplierAdvanceList, supplierAdvanceTotalRemain, applyAdvanceDeduct, clearAdvanceDeduct,
       outstandingBills, apSummary, quickPayBill, showOutstandingPanel, outstandingSearch,
       addSplit, removeSplit, recalcBalances };
   },
@@ -16216,7 +16404,8 @@ app.component('view-payment', {
                   <th class="p-2 w-12"></th>
                 </tr></thead>
                 <tbody>
-                  <tr v-for="(line, idx) in (form.lines||[])" :key="line.id" class="border-t">
+                  <template v-for="(line, idx) in (form.lines||[])" :key="line.id">
+                  <tr class="border-t">
                     <td class="p-1">
                       <!-- 🆕 Searchable input: ค้นได้ทั้งเลขบิล + ชื่อ supplier + amount -->
                       <input type="text" :list="'pmt-bills-'+line.id"
@@ -16239,6 +16428,42 @@ app.component('view-payment', {
                     <td class="p-1"><input type="number" step="0.01" v-model.number="line.bankFee" class="w-full px-1 py-1 border rounded text-right"></td>
                     <td class="p-1 text-center"><button @click="removeLine(idx)" type="button" class="text-red-500 px-1">×</button></td>
                   </tr>
+                  <!-- 🆕 V15 (2026-05-24): Supplier Advance Alert — แสดงเมื่อ supplier มีเงินมัจำคงเหลือ -->
+                  <tr v-if="line.supplierId && supplierAdvanceTotalRemain(line.supplierId) > 0" class="bg-amber-50/60">
+                    <td colspan="8" class="px-2 py-2">
+                      <div class="flex items-start gap-3 flex-wrap">
+                        <div class="flex-1 min-w-[300px]">
+                          <div class="text-sm font-bold text-amber-800 flex items-center gap-2">
+                            💰 Supplier นี้มีเงินมัจำคงเหลือ
+                            <span class="px-2 py-0.5 bg-amber-200 text-amber-900 rounded font-mono">฿{{fmt(supplierAdvanceTotalRemain(line.supplierId))}}</span>
+                          </div>
+                          <div class="text-xs text-amber-700 mt-1">
+                            <span v-for="(a,i) in supplierAdvanceList(line.supplierId)" :key="i" class="inline-block mr-2">
+                              <b>{{a.docNo}}</b> ({{a.date}}): ฿{{fmt(a.remaining)}}<span v-if="i < supplierAdvanceList(line.supplierId).length-1">·</span>
+                            </span>
+                          </div>
+                          <div v-if="line.advanceDeduct > 0" class="text-xs text-emerald-700 mt-2 bg-emerald-50 rounded p-2">
+                            ✅ <b>หักเงินมัจำแล้ว ฿{{fmt(line.advanceDeduct)}}</b>
+                            <span v-for="(al,i) in (line.advanceAllocations||[])" :key="i" class="ml-2">
+                              · {{al.advanceDocNo||al.advanceId}} ฿{{fmt(al.amount)}}
+                            </span>
+                            — เหลือจ่ายจริง: <b>฿{{fmt(line.paymentAmount)}}</b>
+                          </div>
+                        </div>
+                        <div class="flex gap-2 items-start">
+                          <button v-if="line.advanceDeduct <= 0" type="button" @click="applyAdvanceDeduct(line)"
+                            class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded font-bold whitespace-nowrap">
+                            ↙ หักจากเงินมัจำก่อน
+                          </button>
+                          <button v-else type="button" @click="clearAdvanceDeduct(line)"
+                            class="px-3 py-1.5 bg-slate-500 hover:bg-slate-600 text-white text-xs rounded font-bold whitespace-nowrap">
+                            ↩ ยกเลิกหัก
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  </template>
                 </tbody>
                 <tfoot class="bg-slate-50 font-semibold">
                   <tr>
@@ -16279,7 +16504,10 @@ app.component('view-receipt', {
     const filterAccount = ref('');
     const form = ref(makeBlankForm());
 
-    function emptyLine() { return { id: newId('RCL'), billId:'', customerId:'', customerName:'', outstanding:0, receiptAmount:0, discount:0, bankFee:0, withholdingTax:0 }; }
+    function emptyLine() { return { id: newId('RCL'), billId:'', customerId:'', customerName:'', outstanding:0, receiptAmount:0, discount:0, bankFee:0, withholdingTax:0,
+      /* 🆕 V12 (2026-05-24): FX-aware foreign receipt fields — fill when bill is foreign currency */
+      forexCurrency:'', forexAmount:0, forexRate:0, forexExchangeDate:''
+    }; }
     function makeBlankForm() {
       return { docNo:'', date: todayStr(), branchId:'', accountId:'', method:'โอน', notes:'', lines:[emptyLine()] };
     }
@@ -16331,7 +16559,55 @@ app.component('view-receipt', {
         line.customerId = bill.customerId || '';
         line.customerName = erp.customerName(bill.customerId);
         if (num(line.receiptAmount)===0) line.receiptAmount = num(bill.receivableBalance);
+        /* 🆕 V12: ถ้าบิลเป็น foreign currency → preset FX fields ให้พร้อมกรอก */
+        const cur = String(bill.currency||'THB').toUpperCase();
+        if (cur !== 'THB') {
+          line.forexCurrency = cur;
+          if (!num(line.forexRate)) line.forexRate = Number(bill.fxRate||0);
+          if (!line.forexExchangeDate) line.forexExchangeDate = form.value.date || erp.today();
+          // ถ้ายังไม่กรอก foreign amount และมี outstanding → คำนวณจาก outstanding/billFx เป็น default
+          if (!num(line.forexAmount) && Number(bill.fxRate||0) > 0) {
+            line.forexAmount = +(num(bill.receivableBalance) / Number(bill.fxRate||1)).toFixed(4);
+          }
+        } else {
+          line.forexCurrency = '';
+        }
       }
+    }
+    /* 🆕 V12: helper — บิลเป็น foreign currency หรือไม่ */
+    function isForeignLine(line) {
+      if (!line.billId) return false;
+      const bill = safeArr(db.salesBills).find(b => b && b.id === line.billId);
+      if (!bill) return false;
+      return String(bill.currency||'THB').toUpperCase() !== 'THB';
+    }
+    /* 🆕 V12: รายการ FX lines เพื่อแสดง panel */
+    const foreignLines = computed(() => {
+      try {
+        return safeArr(form.value && form.value.lines).filter(l => isForeignLine(l));
+      } catch(e) { return []; }
+    });
+    /* 🆕 V12: เมื่อกรอก forexAmount หรือ forexRate → คำนวณ receiptAmount (THB) อัตโนมัติ */
+    function recalcLineFromForex(line) {
+      const fa = num(line.forexAmount);
+      const fr = num(line.forexRate);
+      if (fa > 0 && fr > 0) {
+        line.receiptAmount = +(fa * fr).toFixed(2);
+      }
+    }
+    /* 🆕 V12: FX gain/loss preview ต่อ line */
+    function lineFxGainLoss(line) {
+      try {
+        if (!isForeignLine(line)) return { fxGL: 0, billFx: 0, settleFx: 0, foreign: 0 };
+        const bill = safeArr(db.salesBills).find(b => b && b.id === line.billId);
+        const billFx = Number(bill?.fxRate||0);
+        const settleFx = num(line.forexRate);
+        const foreign = num(line.forexAmount);
+        if (!billFx || !settleFx || !foreign) return { fxGL: 0, billFx, settleFx, foreign };
+        const thbAtBill = foreign * billFx;
+        const thbAtSettle = foreign * settleFx;
+        return { fxGL: thbAtSettle - thbAtBill, billFx, settleFx, foreign };
+      } catch(e) { return { fxGL: 0, billFx: 0, settleFx: 0, foreign: 0 }; }
     }
 
     const totals = computed(() => {
@@ -16448,22 +16724,23 @@ app.component('view-receipt', {
             bill.updatedBy = ((erp.currentUser && erp.currentUser.value && erp.currentUser.value.username) || '-');
             if (bill.customerId) customerNames.add(erp.customerName(bill.customerId));
 
-            // 🆕 PATCH 29B: FX Gain/Loss for FX bills (currency !== 'THB' and fxRate > 0)
+            // 🆕 PATCH 29B + V12: FX Gain/Loss for FX bills — ใช้ FX rate ที่ user กรอก ถ้ามี
             try {
               const billCurrency = String(bill.currency || 'THB').toUpperCase();
               const billFxRate = Number(bill.fxRate || 0);
               if (billCurrency !== 'THB' && billFxRate > 0) {
-                // Receipt is recorded in THB (line.receiptAmount). Compute foreign equivalent
-                // using receipt-day FX, then compare against bill-day FX to get FX gain/loss.
-                const receiptDateFx = erp.getFxRate ? erp.getFxRate(billCurrency, 'THB', f.date) : null;
-                const settlementRate = (receiptDateFx && receiptDateFx > 0) ? Number(receiptDateFx) : billFxRate;
-                // Foreign amount allocated to this bill = THB allocated / settlement rate
-                const foreignAllocated = allocated / settlementRate;
-                // What that foreign would have been worth at bill rate (THB):
+                // 🆕 V12: ถ้า user กรอก forex ใน line → ใช้ค่าที่กรอก
+                let settlementRate, foreignAllocated;
+                if (num(line.forexAmount) > 0 && num(line.forexRate) > 0) {
+                  settlementRate = num(line.forexRate);
+                  foreignAllocated = num(line.forexAmount);
+                } else {
+                  // fallback เดิม: derive จาก db.fxRates (อัตโนมัติ)
+                  const receiptDateFx = erp.getFxRate ? erp.getFxRate(billCurrency, 'THB', f.date) : null;
+                  settlementRate = (receiptDateFx && receiptDateFx > 0) ? Number(receiptDateFx) : billFxRate;
+                  foreignAllocated = allocated / settlementRate;
+                }
                 const thbAtBillRate = foreignAllocated * billFxRate;
-                // FX gain/loss = THB received now − THB originally accrued (at bill rate)
-                // > 0 means baht weakened → we received MORE baht → FX Gain
-                // < 0 means baht strengthened → we received LESS baht → FX Loss
                 const fxGL = allocated - thbAtBillRate;
                 if (Math.abs(fxGL) > 0.01) {
                   _fxRowsToInsert.push({
@@ -16497,6 +16774,11 @@ app.component('view-receipt', {
             bankFee: num(line.bankFee), withholdingTax: num(line.withholdingTax),
             accountId: f.accountId, method: f.method, notes: f.notes,
             branchId: f.branchId,
+            /* 🆕 V12: foreign currency tracking */
+            forexCurrency: line.forexCurrency || '',
+            forexAmount: num(line.forexAmount),
+            forexRate: num(line.forexRate),
+            forexExchangeDate: line.forexExchangeDate || '',
             createdBy: erp.currentUser.value?.username || '-',
             updatedAt: new Date().toISOString()
           });
@@ -16696,7 +16978,9 @@ app.component('view-receipt', {
       open, openEdit, close: close_, save, remove, addLine, removeLine, pickBill, availableBills,
       getBillDisplay, onBillTyped, actualReceivable: _actualReceivable, fmt: erp.fmt,
       outstandingBillsR, arSummary, quickReceiveBill, showOutstandingPanelR, outstandingSearchR,
-      runCleanupReceiptDups };
+      runCleanupReceiptDups,
+      // 🆕 V12: FX-aware receipt
+      isForeignLine, foreignLines, recalcLineFromForex, lineFxGainLoss };
   },
   template: `
   <div>
@@ -16919,6 +17203,54 @@ app.component('view-receipt', {
                 </tfoot>
               </table>
             </div>
+
+            <!-- 🆕 V12 (2026-05-24): FX RECEIPT PANEL — แสดงเฉพาะ line ที่บิลเป็น foreign currency -->
+            <div v-if="foreignLines.length" class="mt-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <h4 class="font-bold text-blue-900">💱 รับเงินสกุลต่างประเทศ — Track FX Gain/Loss</h4>
+                  <p class="text-xs text-blue-700 mt-1">กรอกยอด foreign + FX rate ที่แลก + วันที่แลก → ระบบคำนวณ THB + FX P&L vs ใบกำกับ</p>
+                </div>
+              </div>
+              <div class="overflow-x-auto bg-white rounded-lg p-2">
+                <table class="w-full text-xs">
+                  <thead class="bg-blue-100">
+                    <tr>
+                      <th class="p-2 text-left">บิล</th>
+                      <th class="p-2 text-center">สกุล</th>
+                      <th class="p-2 text-right">ยอด Foreign *</th>
+                      <th class="p-2 text-right">FX Rate ที่แลก *</th>
+                      <th class="p-2 text-center">วันที่แลก</th>
+                      <th class="p-2 text-right">= THB ที่ลงบัญชี</th>
+                      <th class="p-2 text-right">FX @ ใบกำกับ</th>
+                      <th class="p-2 text-right">💰 FX P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="line in foreignLines" :key="line.id" class="border-t">
+                      <td class="p-2 font-mono text-xs">{{line.customerName}}<br><span class="text-slate-400">{{(db.salesBills.find(b=>b.id===line.billId)||{}).docNo||'-'}}</span></td>
+                      <td class="p-2 text-center font-bold">{{line.forexCurrency||'-'}}</td>
+                      <td class="p-1"><input type="number" step="0.0001" v-model.number="line.forexAmount" @input="recalcLineFromForex(line)" class="w-28 px-2 py-1 border rounded text-right font-bold"></td>
+                      <td class="p-1"><input type="number" step="0.0001" v-model.number="line.forexRate" @input="recalcLineFromForex(line)" class="w-24 px-2 py-1 border rounded text-right font-bold bg-amber-50"></td>
+                      <td class="p-1"><input type="date" v-model="line.forexExchangeDate" class="w-32 px-2 py-1 border rounded text-xs"></td>
+                      <td class="p-2 text-right font-bold text-emerald-700 bg-emerald-50">{{fmt(line.receiptAmount)}}</td>
+                      <td class="p-2 text-right text-slate-500">{{fmt(lineFxGainLoss(line).billFx)}}</td>
+                      <td class="p-2 text-right font-bold" :class="lineFxGainLoss(line).fxGL>=0 ? 'text-emerald-700' : 'text-red-600'">
+                        <span v-if="lineFxGainLoss(line).foreign>0">
+                          {{lineFxGainLoss(line).fxGL>=0?'+':''}}{{fmt(lineFxGainLoss(line).fxGL)}} ฿
+                          <div class="text-[10px] font-normal">{{lineFxGainLoss(line).fxGL>=0?'🟢 Gain':'🔴 Loss'}}</div>
+                        </span>
+                        <span v-else class="text-slate-300">รอกรอก</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-2 italic">
+                💡 <b>FX P&L</b> = (FX ที่แลก − FX ใบกำกับ) × ยอด Foreign · 🟢 = บาทอ่อนค่าหลังออกบิล (ได้ THB เพิ่ม) · 🔴 = บาทแข็งหลังออกบิล (ได้ THB น้อยลง) · บันทึกลง P&L → Other Income/Expense
+              </div>
+            </div>
+
           </div>
         </div>
         <div class="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2"><button @click="close" type="button" class="px-4 py-2 text-sm">ยกเลิก</button><button @click="save" type="button" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium">บันทึก</button></div>
@@ -18570,19 +18902,99 @@ app.component('view-sales', {
       form.customerId = po.customerId;
       form.channelId = po.channelId;
       form.branchId = po.branchId;
-      const matched = erp.poSellMatchedQty(po.id); // already matched (sold) qty
-      const remainingQty = Math.max(0, Number(po.qty||0) - matched);
+      // 🆕 V10: ใช้ delivered จริง (รองรับ poLinks)
+      const remainingQty = erp.poSellRemainingDelivery
+        ? erp.poSellRemainingDelivery(po.id)
+        : Math.max(0, Number(po.qty||0) - erp.poSellMatchedQty(po.id));
       form.items = [{
         id:erp.uid('SL'), productId:po.productId, lotNo:'',
         weight:remainingQty, price:Number(po.unitPrice||0),
         amount:remainingQty*Number(po.unitPrice||0), discount:0,
         netAmount:remainingQty*Number(po.unitPrice||0),
-        unitCost:0, totalCost:0, profit:0, note:'',
-        poSellLineRef:po.id, poQty:Number(po.qty||0), poUnitPrice:Number(po.unitPrice||0)
+        unitCost:0, totalCost:0, profit:0, note:'', sourceMode:'STOCK',
+        poSellLineRef:po.id, poQty:Number(po.qty||0), poUnitPrice:Number(po.unitPrice||0),
+        // 🆕 V10: per-item poLinks (multi-PO support)
+        poLinks: [{ poSellId: po.id, poDocNo: po.docNo, qty: remainingQty }]
       }];
       // recalc with WAC
       form.items.forEach(recalcLine);
       recalcAll();
+    }
+    /* 🆕 V10: PO Sell options สำหรับ dropdown — filter เหลือต้องส่ง > 0 */
+    const poSellDeliveryOptions = computed(() => {
+      try {
+        return (db.poSells||[]).filter(p => p && p.status !== 'Cancelled' && p.status !== 'Closed' && p.status !== 'Completed')
+          .map(p => {
+            const remainingDelivery = erp.poSellRemainingDelivery ? erp.poSellRemainingDelivery(p.id) : (Number(p.qty||0) - erp.poSellMatchedQty(p.id));
+            const productLabel = (p.items && p.items.length)
+              ? p.items.map(it => erp.productName(it.productId)).join(', ')
+              : erp.productName(p.productId);
+            return {
+              id: p.id, docNo: p.docNo, raw: p,
+              customerId: p.customerId,
+              customerLabel: erp.customerName(p.customerId),
+              productLabel,
+              remainingDelivery,
+              totalQty: Number(p.qty||0),
+            };
+          })
+          // 🆕 keep PO ที่เหลือต้องส่ง > 0 หรือ PO ที่เลือกไว้แล้ว (กันหายตอน edit)
+          .filter(x => x.remainingDelivery > 0.01 || x.id === form.poSellId);
+      } catch(e) { return []; }
+    });
+    /* 🆕 V10: PO Sell options ต่อ item — filter โดย product + remaining > 0 */
+    function poSellOptionsForItem(it) {
+      try {
+        if (!it || !it.productId) return [];
+        const usedIds = new Set((it.poLinks||[]).map(lk => lk && lk.poSellId).filter(Boolean));
+        return poSellDeliveryOptions.value.filter(opt => {
+          // 🆕 ตรงสินค้า (root or items[]) — รองรับ PO ที่มี items[]
+          const po = opt.raw;
+          const matchesProduct = po.productId === it.productId ||
+            (po.items||[]).some(pi => pi && pi.productId === it.productId);
+          if (!matchesProduct) return false;
+          // ตรง customer (ถ้าตั้ง customer ในบิลขายแล้ว)
+          if (form.customerId && opt.customerId !== form.customerId) return false;
+          // ไม่เอา PO ที่ใส่ใน item นี้แล้ว
+          if (usedIds.has(opt.id)) return false;
+          return true;
+        });
+      } catch(e) { return []; }
+    }
+    /* 🆕 V10: เพิ่ม PO link ใน item */
+    function addPoLinkToItem(it) {
+      if (!Array.isArray(it.poLinks)) it.poLinks = [];
+      const opts = poSellOptionsForItem(it);
+      if (!opts.length) {
+        alert('ไม่มี PO Sell ของลูกค้า/สินค้านี้ที่เหลือต้องส่ง\nตรวจสอบ:\n• ลูกค้าตรงกัน\n• สินค้าตรงกัน\n• PO นั้นยังไม่ปิด/ส่งครบ');
+        return;
+      }
+      // เลือก PO ที่เหลือมากสุดก่อน
+      const pick = opts.sort((a,b)=>b.remainingDelivery-a.remainingDelivery)[0];
+      // คำนวณ qty ที่จะใส่: ส่วนที่เหลือของ item.weight (หลังหัก poLinks อื่น)
+      const allocated = (it.poLinks||[]).reduce((s,lk)=>s+Number(lk.qty||0), 0);
+      const remainItem = Math.max(0, Number(it.weight||0) - allocated);
+      const suggestQty = Math.min(remainItem, pick.remainingDelivery);
+      it.poLinks.push({ poSellId: pick.id, poDocNo: pick.docNo, qty: suggestQty });
+    }
+    /* 🆕 V10: ลบ PO link */
+    function removePoLink(it, idx) {
+      if (!Array.isArray(it.poLinks)) return;
+      it.poLinks.splice(idx, 1);
+    }
+    /* 🆕 V10: change PO link selection — update docNo + reset qty */
+    function onPoLinkChange(it, lk) {
+      const opt = poSellDeliveryOptions.value.find(o => o.id === lk.poSellId);
+      if (opt) {
+        lk.poDocNo = opt.docNo;
+        const allocated = (it.poLinks||[]).reduce((s,x)=>s+Number(x.qty||0),0) - Number(lk.qty||0);
+        const remainItem = Math.max(0, Number(it.weight||0) - allocated);
+        lk.qty = Math.min(remainItem, opt.remainingDelivery);
+      }
+    }
+    /* 🆕 V10: รวม qty ของ poLinks ใน item */
+    function sumPoLinks(it) {
+      return (it.poLinks||[]).reduce((s,lk)=>s+Number(lk.qty||0), 0);
     }
     function blankItem() { return { id:erp.uid('SL'), productId:'', lotNo:'', weight:0, price:0, amount:0, discount:0, netAmount:0, unitCost:0, totalCost:0, profit:0, tradingCostAmount:0, note:'', sourceMode:'STOCK', sourcePurchaseBillId:'' }; }
     function _salesReceipts(billId) {
@@ -19371,26 +19783,68 @@ app.component('view-sales', {
           } catch(e) { console.error('auto-match:', e); }
         }
       }
-      // update PO Sell sold qty / status
-      if (bill.salesSource === 'PO_DELIVERY' && bill.poSellId) {
-        const po = db.poSells.find(p => p.id === bill.poSellId);
-        if (po) {
-          // create a Match Log entry referencing this sales bill (for tracking sold qty)
-          const totalSold = (bill.items||[]).reduce((s,it)=>s+Number(it.weight||0), 0);
-          db.matchLogs.push({
-            id:erp.uid('ML'), match_id:'AUTO-'+bill.docNo, date:bill.date,
-            po_sell_id: po.id, po_sell_no: po.docNo,
-            cost_pool_id: 'SB-'+bill.id, source_type: 'Sales_Bill', source_id: bill.id, source_no: bill.docNo,
-            product_id: bill.items[0]?.productId,
-            qty_used: totalSold, unit_cost: bill.items[0]?.unitCost||0, total_cost: bill.totalCost,
-            allocation_mode: 'PO Delivery (Actual Sale)', status:'approved',
-            createdBy: bill.createdBy, createdAt: new Date().toISOString()
+      /* 🆕 V13: Auto-detect PO_DELIVERY — ถ้ามี item ใดมี poLinks ก็นับเป็น PO_DELIVERY */
+      const _hasAnyPoLink = (bill.items||[]).some(it => Array.isArray(it.poLinks) && it.poLinks.length > 0 && it.poLinks.some(lk => lk && lk.poSellId && Number(lk.qty||0) > 0));
+      if (_hasAnyPoLink && bill.salesSource !== 'PO_DELIVERY') {
+        bill.salesSource = 'PO_DELIVERY';   // legacy compat
+      }
+      // update PO Sell sold qty / status — 🆕 V10: รองรับ multi-PO per item (item.poLinks)
+      if (bill.salesSource === 'PO_DELIVERY' || _hasAnyPoLink) {
+        try {
+          // รวบรวม PO links ทั้งหมดจาก items (รวมทั้ง primary bill.poSellId ถ้าไม่มี poLinks)
+          const allLinks = []; // {poSellId, qty, productId, unitCost}
+          (bill.items||[]).forEach(it => {
+            if (Array.isArray(it.poLinks) && it.poLinks.length > 0) {
+              it.poLinks.forEach(lk => {
+                if (lk && lk.poSellId && Number(lk.qty||0) > 0) {
+                  allLinks.push({
+                    poSellId: lk.poSellId,
+                    qty: Number(lk.qty||0),
+                    productId: it.productId,
+                    unitCost: Number(it.unitCost||0),
+                    weightShare: Number(it.weight||0) > 0 ? Number(lk.qty||0) / Number(it.weight||0) : 0,
+                    netAmount: Number(it.netAmount||0)
+                  });
+                }
+              });
+            } else if (bill.poSellId) {
+              // legacy: ใช้ bill-level poSellId, qty = item.weight ทั้งหมด
+              allLinks.push({
+                poSellId: bill.poSellId,
+                qty: Number(it.weight||0),
+                productId: it.productId,
+                unitCost: Number(it.unitCost||0),
+                weightShare: 1,
+                netAmount: Number(it.netAmount||0)
+              });
+            }
           });
-          const matched = erp.poSellMatchedQty(po.id);
-          if (matched >= Number(po.qty)) po.status = 'Fully Matched';
-          else po.status = 'Partially Matched';
-          erp.logAudit('po-sell-deliver','poSell', null, po);
-        }
+          // Group by poSellId แล้วสร้าง matchLog 1 entry ต่อ PO (รวม qty + cost)
+          const byPo = {};
+          allLinks.forEach(lk => {
+            if (!byPo[lk.poSellId]) byPo[lk.poSellId] = { qty: 0, totalCost: 0, productId: lk.productId, unitCost: lk.unitCost };
+            byPo[lk.poSellId].qty += lk.qty;
+            byPo[lk.poSellId].totalCost += lk.qty * lk.unitCost;
+          });
+          Object.keys(byPo).forEach(poId => {
+            const po = db.poSells.find(p => p && p.id === poId);
+            if (!po) return;
+            const g = byPo[poId];
+            db.matchLogs.push({
+              id:erp.uid('ML'), match_id:'AUTO-'+bill.docNo+'-'+po.docNo, date:bill.date,
+              po_sell_id: po.id, po_sell_no: po.docNo,
+              cost_pool_id: 'SB-'+bill.id, source_type: 'Sales_Bill', source_id: bill.id, source_no: bill.docNo,
+              product_id: g.productId,
+              qty_used: g.qty, unit_cost: g.unitCost, total_cost: g.totalCost,
+              allocation_mode: 'PO Delivery (Actual Sale)', status:'approved',
+              createdBy: bill.createdBy, createdAt: new Date().toISOString()
+            });
+            const matched = erp.poSellMatchedQty(po.id);
+            if (matched >= Number(po.qty)) po.status = 'Fully Matched';
+            else po.status = 'Partially Matched';
+            erp.logAudit('po-sell-deliver','poSell', null, po);
+          });
+        } catch(plErr) { console.error('[PO_DELIVERY save]', plErr); }
       }
       showForm.value = false;
       // 🆕 Force push ทันทีและรอจนเสร็จ — กัน auto-pull ดึงข้อมูลเก่ากลับมาทับ
@@ -19788,6 +20242,8 @@ app.component('view-sales', {
       openFromWeighing,   /* 🆕 weighing → SB */
       open, save, addItem, removeItem, recalcLine, recalcAll, onItemSourceChange, onTradingPbChange, splitTradingLine, hasStockItem, cancelBill, deleteBill, filtered, statusBadge, statusText,
       loadFromPOSell, availableTradingPurchases, loadFromTradingPurchase, billTotals, toggleVatIssued, goToPendingSale, fmt:erp.fmt,
+      // 🆕 V10 (2026-05-24): Multi-PO per item
+      poSellDeliveryOptions, poSellOptionsForItem, addPoLinkToItem, removePoLink, onPoLinkChange, sumPoLinks,
       addTradingPurchase, removeTradingPurchase,
       // 🆕 Multi-select
       selectedSalesIds, toggleSalesSelect, clearSalesSelection, selectAllSalesInFilter, bulkDeleteSales,
@@ -20006,22 +20462,9 @@ app.component('view-sales', {
             </div>
           </div>
 
-          <!-- Sales Source Toggle -->
-          <div class="flex gap-2 mb-2">
-            <button @click="form.salesSource='DIRECT'; form.poSellId=''" :class="['px-4 py-2 rounded-lg text-sm font-medium border-2', form.salesSource==='DIRECT' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-300']">📦 DIRECT (ขายตรง)</button>
-            <button @click="form.salesSource='PO_DELIVERY'" :class="['px-4 py-2 rounded-lg text-sm font-medium border-2', form.salesSource==='PO_DELIVERY' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white border-slate-300']">📋 PO_DELIVERY (ส่งของตาม PO Sell)</button>
-          </div>
-          <div v-if="form.salesSource==='PO_DELIVERY'" class="bg-purple-50 border border-purple-200 rounded p-3 mb-2">
-            <label class="block text-xs text-purple-700 font-semibold mb-1">เลือก PO Sell ที่จะส่งของ *</label>
-            <select v-model="form.poSellId" @change="loadFromPOSell" class="w-full px-2 py-1.5 border rounded text-sm">
-              <option value="">-- เลือก PO Sell --</option>
-              <option v-for="p in db.poSells.filter(x=>x.status!=='Cancelled' && x.status!=='Fully Matched')" :value="p.id">
-                {{p.docNo}} | {{erp.customerName(p.customerId)}} | {{erp.productName(p.productId)}} | คงเหลือ {{fmt(Number(p.qty)-erp.poSellMatchedQty(p.id))}} กก.
-              </option>
-            </select>
-            <div v-if="form.poSellId" class="text-xs text-slate-600 mt-1">
-              💡 ดึง Customer/สินค้า/ราคาจาก PO Sell — ตัด PO Sell อัตโนมัติเมื่อบันทึก + เทียบ Deal vs Actual Margin
-            </div>
+          <!-- 🆕 V13 (2026-05-24): ลบ Sales Source Toggle + Primary PO — ใช้ per-item PO selector แทน -->
+          <div class="bg-slate-50 border border-slate-200 rounded p-2 mb-2 text-xs text-slate-600">
+            💡 <b>บิลขาย:</b> เลือกสินค้าแต่ละช่อง — ถ้ามี PO Sell ค้างส่งของลูกค้านี้/สินค้านั้น จะ pop ปุ่ม "+ PO" ให้กดเพื่อตัดได้หลาย PO ในรายการเดียว
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
@@ -20091,6 +20534,8 @@ app.component('view-sales', {
                   <th class="p-2 text-right w-28">ราคา/หน่วย</th>
                   <th class="p-2 text-right w-28">ยอดรวม</th>
                   <th class="p-2 text-center w-40 bg-amber-50">📊 Stock/ทุน → หลังขาย</th>
+                  <!-- 🆕 V13: PO Links column — แสดงเสมอ (ถ้าสินค้านั้นมี PO Sell ค้าง) -->
+                  <th class="p-2 text-left min-w-[280px] bg-purple-50">📋 ตัด PO Sell (เลือก/หลาย PO)</th>
                   <th class="p-2 w-8"></th>
                 </tr></thead>
                 <tbody>
@@ -20137,6 +20582,25 @@ app.component('view-sales', {
                         </div>
                       </template>
                       <span v-else class="text-slate-400">เลือกสินค้าก่อน</span>
+                    </td>
+                    <!-- 🆕 V13: per-item PO Links (Multi-PO) — แสดงเสมอ -->
+                    <td class="p-1 bg-purple-50/30 align-top">
+                      <div v-if="!Array.isArray(it.poLinks) || it.poLinks.length===0" class="text-xs text-slate-400 italic mb-1">— ยังไม่ได้ตัด PO —</div>
+                      <div v-for="(lk, lkIdx) in (it.poLinks||[])" :key="lkIdx" class="flex gap-1 items-center mb-1 bg-white border border-purple-200 rounded p-1">
+                        <select v-model="lk.poSellId" @change="onPoLinkChange(it, lk)" class="flex-1 px-1 py-0.5 border rounded text-[11px]">
+                          <option v-if="lk.poSellId" :value="lk.poSellId">{{lk.poDocNo||'PO'}} ({{fmt((db.poSells.find(p=>p.id===lk.poSellId)?.qty)||0)}} กก.)</option>
+                          <option v-for="opt in poSellOptionsForItem(it)" :key="opt.id" :value="opt.id">
+                            {{opt.docNo}} — เหลือ {{fmt(opt.remainingDelivery)}}
+                          </option>
+                        </select>
+                        <input type="number" step="0.01" v-model.number="lk.qty" class="w-20 px-1 py-0.5 border rounded text-right text-[11px]" placeholder="กก.">
+                        <button type="button" @click="removePoLink(it, lkIdx)" class="text-red-500 hover:bg-red-50 rounded px-1 text-xs">×</button>
+                      </div>
+                      <button type="button" @click="addPoLinkToItem(it)" class="text-[11px] px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white rounded font-bold">+ PO</button>
+                      <div class="text-[10px] mt-1" :class="Math.abs(sumPoLinks(it) - Number(it.weight||0)) < 0.5 ? 'text-emerald-700' : 'text-red-600 font-bold'">
+                        Σ PO: <b>{{fmt(sumPoLinks(it))}}</b> / {{fmt(it.weight||0)}}
+                        <span v-if="Math.abs(sumPoLinks(it) - Number(it.weight||0)) >= 0.5">⚠️ ไม่ตรง</span>
+                      </div>
                     </td>
                     <td class="p-1 text-center"><button v-if="(form.items||[]).length>1" @click="removeItem(idx)" class="text-red-500 px-2 hover:bg-red-50 rounded">×</button></td>
                   </tr>
@@ -22820,6 +23284,25 @@ app.component('view-poSell', {
       p.status = 'Cancelled';
       erp.logAudit('cancel','poSell', before, p); erp.showToast('ยกเลิกแล้ว');
     }
+    /* 🆕 V10: Confirm Close PO Sell — set status = Completed */
+    function confirmClose(p) {
+      const delivered = erp.poSellDeliveredQty ? erp.poSellDeliveredQty(p.id) : 0;
+      const target = Number(p.qty||0);
+      const diff = delivered - target;
+      const diffSign = diff > 0 ? '+' : '';
+      const msg = `✅ ปิด PO Sell ${p.docNo}?\n\n` +
+        `เป้าหมาย: ${target.toLocaleString('th-TH')} กก.\n` +
+        `ส่งจริง: ${delivered.toLocaleString('th-TH')} กก. (${diffSign}${diff.toFixed(2)})\n\n` +
+        `→ status = 'Completed' (ไม่ขึ้นใน dropdown บิลขายอีก)\n` +
+        `(ถ้าต้องการเปิดใหม่ ต้องแก้ status manual)`;
+      if (!confirm(msg)) return;
+      const before = JSON.parse(JSON.stringify(p));
+      p.status = 'Completed';
+      p.closedAt = new Date().toISOString();
+      p.closedBy = erp.currentUser.value?.username || '-';
+      erp.logAudit('close','poSell', before, p);
+      erp.showToast('✓ ปิด PO Sell '+p.docNo+' แล้ว');
+    }
     const filterMatch = ref('');                       // '' / Not / Partial / Full / Over
     const filterDateFrom = ref(''); const filterDateTo = ref('');
     const enriched = computed(() => db.poSells.map(p => {
@@ -22835,7 +23318,15 @@ app.component('view-poSell', {
       else matchStatus = 'Partially Matched';
       const dealMargin = Number(p.totalRevenue||0) - matchedCost;
       const dealMarginPct = Number(p.totalRevenue||0)>0 ? dealMargin/Number(p.totalRevenue)*100 : 0;
-      return {...p, matched, matchedCost, remaining, pct, matchStatus, dealMargin, dealMarginPct};
+      /* 🆕 V10: delivered จริง (จาก SB) + เหลือต้องส่ง */
+      const delivered = erp.poSellDeliveredQty ? erp.poSellDeliveredQty(p.id) : 0;
+      const remainingDelivery = Math.max(0, Number(p.qty||0) - delivered);
+      const deliveryPct = Number(p.qty||0)>0 ? delivered/Number(p.qty)*100 : 0;
+      /* ปุ่ม Confirm Close ปรากฏเมื่อใกล้ครบ (delivered อยู่ระหว่าง 80%-120% ของ qty) */
+      const canConfirmClose = (p.status!=='Cancelled' && p.status!=='Closed' && p.status!=='Completed') &&
+        delivered > 0 && (deliveryPct >= 80 || delivered >= Number(p.qty||0));
+      return {...p, matched, matchedCost, remaining, pct, matchStatus, dealMargin, dealMarginPct,
+        delivered, remainingDelivery, deliveryPct, canConfirmClose};
     }).filter(p => {
       if (filterMatch.value && p.matchStatus !== filterMatch.value) return false;
       if (filterDateFrom.value && (p.date||'') < filterDateFrom.value) return false;
@@ -22883,18 +23374,22 @@ app.component('view-poSell', {
       return { totalPO, notMatched, partial, full, totalRevenue, totalQty, matchedQty, remainingQty, remainingRev, topCustomers };
     });
 
-    /* 📋 Outstanding (รอส่งของ) */
+    /* 📋 Outstanding (รอส่งของ) — 🆕 V10: ใช้ actual delivery จาก SB (รองรับ multi-PO poLinks) */
     const sellOutstandingList = computed(() => {
       return enriched.value
-        .filter(p => p.status !== 'Cancelled' && p.matchStatus !== 'Fully Matched' && p.matchStatus !== 'Over Matched')
+        .filter(p => p.status !== 'Cancelled' && p.status !== 'Closed' && p.status !== 'Completed')
         .map(p => {
-          const remain = Math.max(0, Number(p.qty||0) - Number(p.matched||0));
+          // 🆕 ใช้ delivered จริงจาก SB (ไม่ใช่ match logs)
+          const delivered = erp.poSellDeliveredQty ? erp.poSellDeliveredQty(p.id) : Number(p.matched||0);
+          const remain = Math.max(0, Number(p.qty||0) - delivered);
           const ratio = Number(p.qty||0)>0 ? remain/Number(p.qty) : 0;
           return {
+            id: p.id,
             docNo: p.docNo, date: p.date, deliveryDate: p.deliveryDate,
             customerName: erp.customerName(p.customerId),
             productName: erp.productName(p.productId),
             qty: Number(p.qty||0), matchedQty: Number(p.matched||0),
+            deliveredQty: delivered,
             remainingQty: remain, unitPrice: Number(p.unitPrice||0),
             remainingValue: Number(p.totalRevenue||0) * ratio,
             status: p.matchStatus,
@@ -22904,7 +23399,8 @@ app.component('view-poSell', {
     });
 
     return { db, erp, form, showForm, editing, search, filterMatch, filterDateFrom, filterDateTo, enriched, open, save, cancel, matchBadge,
-      addItem, removeItem, recalcItem, formTotals, sellDashboard, sellOutstandingList, fmt:erp.fmt };
+      addItem, removeItem, recalcItem, formTotals, sellDashboard, sellOutstandingList, fmt:erp.fmt,
+      confirmClose /* 🆕 V10 */ };
   },
   template:`
   <div>
@@ -23044,8 +23540,17 @@ app.component('view-poSell', {
             <td class="p-2 text-right" :class="p.dealMarginPct>=0?'text-emerald-700':'text-red-600'">{{p.dealMarginPct.toFixed(2)}}%</td>
             <td class="p-2 text-center"><span :class="['px-2 py-0.5 rounded-full text-xs', matchBadge(p.matchStatus)]">{{p.matchStatus}}</span></td>
             <td class="p-2 text-right whitespace-nowrap">
-              <button @click="open(p)" class="text-blue-600 text-xs hover:underline mr-2">แก้</button>
-              <button v-if="p.status!=='Cancelled'" @click="cancel(p)" class="text-red-600 text-xs hover:underline">ยกเลิก</button>
+              <div class="flex flex-col gap-1 items-end">
+                <div class="flex gap-2">
+                  <button @click="open(p)" class="text-blue-600 text-xs hover:underline">แก้</button>
+                  <button v-if="p.status!=='Cancelled' && p.status!=='Completed' && p.status!=='Closed'" @click="cancel(p)" class="text-red-600 text-xs hover:underline">ยกเลิก</button>
+                </div>
+                <!-- 🆕 V10: Confirm Close PO Sell — ขึ้นเมื่อส่งใกล้ครบ -->
+                <button v-if="p.canConfirmClose" @click="confirmClose(p)" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] rounded font-bold whitespace-nowrap" :title="'ส่งจริง '+fmt(p.delivered)+' กก. / เป้า '+fmt(p.qty)+' กก. ('+p.deliveryPct.toFixed(1)+'%)'">
+                  ✅ Confirm Close
+                </button>
+                <span v-else-if="p.status==='Completed' || p.status==='Closed'" class="px-2 py-0.5 bg-slate-200 text-slate-600 text-[10px] rounded font-bold">🔒 {{p.status}}</span>
+              </div>
             </td>
           </tr>
           <tr v-if="enriched.length===0"><td colspan="12" class="text-center py-10 text-slate-400">ยังไม่มี PO Sell</td></tr>
@@ -23621,8 +24126,16 @@ app.component('view-costAllocator', {
       return arr;
     });
     function changeQty(c) {
-      c.qty_to_use = Math.max(0, Math.min(Number(c.qty_to_use||0), c.available_qty));
+      /* 🆕 V13: clamp per-row to available + cap total at remainingNeed */
+      const requested = Math.max(0, Number(c.qty_to_use||0));
+      const others = candidates.value.filter(x => x !== c).reduce((s,x)=>s+Number(x.qty_to_use||0), 0);
+      const headroom = Math.max(0, remainingNeed.value - others);
+      c.qty_to_use = Math.min(requested, c.available_qty, headroom);
       c.total_cost_use = c.qty_to_use * c.unit_cost;
+      /* แจ้งเตือนสั้นๆ ถ้าโดน clamp */
+      if (requested > c.qty_to_use + 0.001) {
+        if (erp.showToast) erp.showToast('⚠ qty ถูก clamp: ใช้ได้ '+c.qty_to_use.toFixed(2)+' กก. (เกิน remaining หรือ available)','warning');
+      }
     }
     const totalToMatch = computed(()=>candidates.value.reduce((s,c)=>s+Number(c.qty_to_use||0),0));
     const totalCostMatch = computed(()=>candidates.value.reduce((s,c)=>s+Number(c.total_cost_use||0),0));
@@ -23981,7 +24494,23 @@ app.component('view-costAllocator', {
         <div class="bg-red-50 p-3 rounded"><div class="text-xs text-red-600">ต้นทุนที่จะตัด</div><div class="font-bold text-red-700">{{fmt(totalCostMatch)}}</div></div>
         <div class="bg-purple-50 p-3 rounded"><div class="text-xs text-purple-600">Expected Margin</div><div class="font-bold" :class="expectedMargin>=0?'text-emerald-700':'text-red-600'">{{fmt(expectedMargin)}}</div></div>
       </div>
-      <div class="mt-4 flex justify-end gap-2"><button @click="candidates=[]" class="px-4 py-2 text-sm">ยกเลิก</button><button @click="confirm" class="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium" :disabled="totalToMatch <= 0" :class="totalToMatch <= 0 ? 'opacity-50 cursor-not-allowed' : ''">✓ ยืนยัน Match → สร้าง Match Log</button></div>
+      <!-- 🆕 V13 (2026-05-24): Block confirm ถ้า match เกินที่ต้องการ -->
+      <div v-if="totalToMatch > remainingNeed + 0.01" class="mt-3 bg-red-50 border-2 border-red-400 rounded-lg p-3 text-sm">
+        <div class="font-bold text-red-700">🚫 Match เกิน — ปุ่ม confirm ถูก disable</div>
+        <div class="text-xs text-red-600 mt-1">
+          รวมจะ Match: <b>{{fmt(totalToMatch)}}</b> กก. · ต้องการ: <b>{{fmt(remainingNeed)}}</b> กก. · เกิน <b class="text-red-700">{{fmt(totalToMatch - remainingNeed)}}</b> กก.
+          → ลด qty ในตารางด้านบนให้รวมไม่เกิน {{fmt(remainingNeed)}} กก.
+        </div>
+      </div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button @click="candidates=[]" class="px-4 py-2 text-sm">ยกเลิก</button>
+        <button @click="confirm"
+          class="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium"
+          :disabled="totalToMatch <= 0 || totalToMatch > remainingNeed + 0.01"
+          :class="(totalToMatch <= 0 || totalToMatch > remainingNeed + 0.01) ? 'opacity-50 cursor-not-allowed bg-slate-400' : ''">
+          ✓ ยืนยัน Match → สร้าง Match Log
+        </button>
+      </div>
     </div>
   </div>`
 });
@@ -24127,6 +24656,62 @@ app.component('view-waitingAllocations', {
       } catch(e) { console.warn('[waitingAllocations] navigate err:', e); }
     }
 
+    /* 🆕 V10 (2026-05-24): PO Sells ที่ค้าง allocate ต้นทุนจาก Cost Pool (Dual Costing) */
+    const pendingPOSells = computed(() => {
+      try {
+        return (db.poSells||[])
+          .filter(p => p && p.status !== 'Cancelled' && p.status !== 'Closed' && p.status !== 'Completed')
+          .filter(p => {
+            // เอาเฉพาะ dual-costing (copper/brass)
+            const productId = p.productId || (p.items && p.items[0] && p.items[0].productId);
+            return productId && (erp.isDualCostingProduct ? erp.isDualCostingProduct(productId) : false);
+          })
+          .map(p => {
+            const matched = erp.poSellMatchedQty(p.id);
+            const target = Number(p.qty||0);
+            const pending = Math.max(0, target - matched);
+            const delivered = erp.poSellDeliveredQty ? erp.poSellDeliveredQty(p.id) : 0;
+            const productId = p.productId || (p.items && p.items[0] && p.items[0].productId);
+            const prod = (db.products||[]).find(x => x && x.id === productId);
+            return {
+              id: p.id, docNo: p.docNo, date: p.date, customerId: p.customerId, productId,
+              customerName: erp.customerName(p.customerId),
+              productName: prod ? (prod.code+' - '+prod.name) : productId,
+              metalGroup: prod ? prod.metalGroup : '',
+              target, matched, pending, delivered,
+              matchPct: target > 0 ? matched/target*100 : 0,
+              revenuePending: pending * Number(p.unitPrice||0),
+              unitPrice: Number(p.unitPrice||0),
+            };
+          })
+          .filter(r => r.pending > 0.01)
+          .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+      } catch(e) { console.warn('[pendingPOSells]', e); return []; }
+    });
+    const poSellStats = computed(() => {
+      const arr = pendingPOSells.value;
+      return {
+        count: arr.length,
+        notStarted: arr.filter(p => p.matched <= 0).length,
+        partial: arr.filter(p => p.matched > 0 && p.matched < p.target).length,
+        totalPendingQty: arr.reduce((s,p)=>s+p.pending, 0),
+        totalPendingRev: arr.reduce((s,p)=>s+p.revenuePending, 0),
+      };
+    });
+    /* 🆕 V10: เปิด PO Sell ไป Cost Allocator (preselect) */
+    function openPOSellInAllocator(p) {
+      try {
+        window._waitingAllocatorPreselect = {
+          sourceMode: 'PO_SELL',
+          productId: p.productId,
+          poSellId: p.id,
+        };
+        if (window._setView) window._setView('costAllocator');
+        else if (window.$nav) window.$nav('costAllocator');
+        else location.hash = '#costAllocator';
+      } catch(e) { console.warn('openPOSellInAllocator:', e); }
+    }
+
     /* 🆕 Grade Adjustment ที่ค้าง Match Cost (status = pending_cost / partial) */
     const pendingGAs = computed(() => {
       const arr = (db.gradeAdjustments || []).filter(g => g && g.status === 'posted' && (g.costStatus === 'pending_cost' || g.costStatus === 'partial'));
@@ -24167,6 +24752,7 @@ app.component('view-waitingAllocations', {
              weightDiffs, diffStats, rebalanceCostPool, showDiffDetail,
              diffMode, diffTargetCost,   /* 🆕 mode picker state */
              pendingGAs, gaStats, openGAToMatch,
+             pendingPOSells, poSellStats, openPOSellInAllocator,   /* 🆕 V10: PO Sell pending */
              productName: (id)=>erp.productName?erp.productName(id):id,
              customerName: (id)=>erp.customerName?erp.customerName(id):id };
   },
@@ -24245,6 +24831,60 @@ app.component('view-waitingAllocations', {
       </div>
     </div>
 
+    <!-- 🆕 V10 (2026-05-24): PO SELL ค้าง Allocate Cost -->
+    <div v-if="pendingPOSells.length > 0" class="bg-purple-50 border-2 border-purple-300 rounded-xl p-4 mb-4 shadow-md">
+      <div class="flex justify-between items-start mb-3">
+        <div>
+          <div class="text-lg font-bold text-purple-900 flex items-center gap-2">
+            📤 PO Sell ค้าง Allocate ต้นทุน — {{poSellStats.count}} ใบ
+          </div>
+          <div class="text-xs text-purple-700 mt-1">PO Sell (ทองแดง/ทองเหลือง) ที่ยังไม่ได้ allocate ต้นทุนจาก Cost Pool ครบ — ปุ่ม "Allocate" เด้งไป Cost Allocator พร้อม preselect</div>
+          <div class="flex flex-wrap gap-3 mt-2 text-xs">
+            <span v-if="poSellStats.notStarted > 0" class="px-2 py-1 bg-red-100 text-red-800 rounded font-bold">🔴 ยังไม่เริ่ม {{poSellStats.notStarted}} ใบ</span>
+            <span v-if="poSellStats.partial > 0" class="px-2 py-1 bg-amber-100 text-amber-800 rounded font-bold">🟡 บางส่วน {{poSellStats.partial}} ใบ</span>
+            <span class="px-2 py-1 bg-purple-100 text-purple-800 rounded font-bold">🏋 รวมรอ {{fmt(poSellStats.totalPendingQty)}} กก. · ฿{{fmt(poSellStats.totalPendingRev)}}</span>
+          </div>
+        </div>
+      </div>
+      <div class="bg-white rounded-lg p-3 border border-purple-200 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-purple-100">
+            <tr>
+              <th class="p-2 text-left">เลขที่ PO</th>
+              <th class="p-2 text-left">วันที่</th>
+              <th class="p-2 text-left">Customer</th>
+              <th class="p-2 text-left">สินค้า</th>
+              <th class="p-2 text-center">หมวด</th>
+              <th class="p-2 text-right">จอง (กก.)</th>
+              <th class="p-2 text-right">Allocated</th>
+              <th class="p-2 text-right text-purple-700">ค้าง Allocate</th>
+              <th class="p-2 text-right">มูลค่ารอ</th>
+              <th class="p-2 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in pendingPOSells" :key="p.id" class="border-t hover:bg-purple-50/30">
+              <td class="p-2 font-mono font-bold">{{p.docNo}}</td>
+              <td class="p-2 text-xs">{{p.date}}</td>
+              <td class="p-2 text-xs">{{p.customerName}}</td>
+              <td class="p-2 text-xs">{{p.productName}}</td>
+              <td class="p-2 text-center"><span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs">{{p.metalGroup}}</span></td>
+              <td class="p-2 text-right">{{fmt(p.target)}}</td>
+              <td class="p-2 text-right text-emerald-700">{{fmt(p.matched)}}</td>
+              <td class="p-2 text-right font-bold text-purple-700">{{fmt(p.pending)}}</td>
+              <td class="p-2 text-right text-emerald-700">฿{{fmt(p.revenuePending)}}</td>
+              <td class="p-2 text-center">
+                <button @click="openPOSellInAllocator(p)" class="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded font-bold">🎯 Allocate →</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="text-xs text-slate-500 mt-2 italic">
+        💡 คลิก "Allocate" → เปิด Cost Allocator พร้อม preselect PO นี้ — เลือก lot จาก Cost Pool แล้วกด "ยืนยัน Match"
+      </div>
+    </div>
+
     <!-- 🆕 GRADE ADJUSTMENT — ค้าง Match Cost -->
     <div v-if="pendingGAs.length > 0" class="bg-cyan-50 border-2 border-cyan-300 rounded-xl p-4 mb-4 shadow-md">
       <div class="flex justify-between items-start mb-3">
@@ -24311,6 +24951,13 @@ app.component('view-waitingAllocations', {
       <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">น้ำหนักรอ SB</div><div class="text-lg font-bold text-blue-700">{{fmt(stats.totalQty)}} กก.</div></div>
       <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">มูลค่า SB รอ Match</div><div class="text-lg font-bold text-emerald-700">฿{{fmt(stats.totalRev)}}</div></div>
       <div class="bg-cyan-50 rounded-lg shadow p-3 border border-cyan-300"><div class="text-xs text-cyan-700 font-bold">🔀 GA รอ Match</div><div class="text-2xl font-bold text-cyan-700">{{gaStats.count}}</div><div class="text-[10px] text-cyan-600">{{fmt(gaStats.totalPendingQty)}} กก.</div></div>
+    </div>
+    <!-- 🆕 V10: PO Sell pending allocation summary card (row 2) -->
+    <div v-if="pendingPOSells.length > 0" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="bg-purple-50 rounded-lg shadow p-3 border border-purple-300"><div class="text-xs text-purple-700 font-bold">📤 PO Sell รอ Allocate</div><div class="text-2xl font-bold text-purple-700">{{poSellStats.count}}</div></div>
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">ยังไม่เริ่ม</div><div class="text-2xl font-bold text-red-600">{{poSellStats.notStarted}}</div></div>
+      <div class="bg-white rounded-lg shadow p-3"><div class="text-xs text-slate-500">บางส่วน</div><div class="text-2xl font-bold text-amber-600">{{poSellStats.partial}}</div></div>
+      <div class="bg-emerald-50 rounded-lg shadow p-3"><div class="text-xs text-emerald-600">มูลค่ารอ Allocate</div><div class="text-lg font-bold text-emerald-700">฿{{fmt(poSellStats.totalPendingRev)}}</div></div>
     </div>
 
     <!-- By Category -->
@@ -24403,6 +25050,7 @@ app.component('view-costAllocationLedger', {
     const filterStatus = ref('approved');       // approved | reversed | all
     const filterDateFrom = ref('');
     const filterDateTo = ref('');
+    const expandedMatch = ref('');              // 🆕 V14: drill-down match_id
 
     // Build ledger rows per Req #11 — enrich matchLog with derived fields
     const ledgerRows = computed(() => {
@@ -24508,8 +25156,100 @@ app.component('view-costAllocationLedger', {
       a.click();
     }
 
+    /* 🆕 V14 (2026-05-24): Group ledger rows by match_id → 1 row per match */
+    const groupedMatches = computed(() => {
+      const groups = new Map();
+      ledgerRows.value.forEach(r => {
+        const k = r.match_id || ('SOLO-'+r.id);
+        if (!groups.has(k)) {
+          groups.set(k, {
+            match_id: k,
+            source_type: r.source_type,
+            sale_doc_no: r.sale_doc_no,
+            product_id: r.product_id,
+            product_name: r.product_name,
+            product_category: r.product_category,
+            sale_qty: r.sale_qty,
+            allocated_qty: 0,
+            total_cost: 0,
+            allocated_revenue: 0,
+            gross_profit: 0,
+            lot_count: 0,
+            allocated_by: r.allocated_by,
+            allocated_at: r.allocated_at,
+            status: r.status,
+            lots: [],     // list of underlying ledger rows
+          });
+        }
+        const g = groups.get(k);
+        g.allocated_qty += Number(r.allocated_qty||0);
+        g.total_cost += Number(r.total_cost||0);
+        g.allocated_revenue += Number(r.allocated_revenue||0);
+        g.gross_profit += Number(r.gross_profit||0);
+        g.lot_count++;
+        g.lots.push(r);
+        // ใช้ allocated_at ล่าสุด เป็น sort key
+        if ((r.allocated_at||'') > (g.allocated_at||'')) g.allocated_at = r.allocated_at;
+      });
+      return Array.from(groups.values()).map(g => ({
+        ...g,
+        avg_cost: g.allocated_qty > 0 ? g.total_cost/g.allocated_qty : 0,
+        gp_pct: g.allocated_revenue > 0 ? g.gross_profit/g.allocated_revenue*100 : 0,
+      })).sort((a,b) => (b.allocated_at||'').localeCompare(a.allocated_at||''));
+    });
+
+    /* 🆕 V14: Drill toggle */
+    function toggleExpand(matchId) {
+      expandedMatch.value = expandedMatch.value === matchId ? '' : matchId;
+    }
+    /* 🆕 V14: Edit match → reverse แล้ว navigate ไป Cost Allocator ใหม่ (ห้ามแก้บางส่วน) */
+    function editMatch(g) {
+      const lots = (db.matchLogs||[]).filter(m => m && m.match_id === g.match_id && m.status !== 'reversed');
+      if (!lots.length) { alert('ไม่พบ lot ภายใต้ Match ID นี้'); return; }
+      const msg = `📝 แก้ไข Match ${g.match_id}?\n\n` +
+        `❗ ไม่สามารถแก้บางส่วนได้ — ระบบจะ:\n` +
+        `1. Reverse ทุก lot ของ match นี้ (${lots.length} lots, ${g.allocated_qty.toFixed(2)} กก., ฿${g.total_cost.toFixed(2)})\n` +
+        `2. คืนของเข้า Cost Pool\n` +
+        `3. นำคุณไปหน้า Cost Allocator เพื่อ match ใหม่\n\n` +
+        `ดำเนินการต่อ?`;
+      if (!confirm(msg)) return;
+      // Reverse all lots
+      lots.forEach(m => { m.status = 'reversed'; m.reversedAt = new Date().toISOString(); m.reversedBy = (erp.currentUser.value?.username||'-'); });
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+      erp.logAudit && erp.logAudit('match-reverse-for-edit','matchLog', null, { match_id: g.match_id, lots: lots.length });
+      // Preselect Cost Allocator with the same target
+      try {
+        const firstLot = lots[0];
+        window._waitingAllocatorPreselect = {
+          sourceMode: firstLot.target_type || 'PO_SELL',
+          productId: g.product_id,
+          poSellId: firstLot.po_sell_id || '',
+          spotKey: (firstLot.target_bill_id && firstLot.target_item_id) ? (firstLot.target_bill_id+'::'+firstLot.target_item_id) : '',
+        };
+        if (window._setView) window._setView('costAllocator');
+        else if (window.$nav) window.$nav('costAllocator');
+        else location.hash = '#costAllocator';
+        erp.showToast('✓ Reverse '+lots.length+' lots — ไป Cost Allocator เพื่อ match ใหม่','success');
+      } catch(e) { console.warn('editMatch nav:', e); }
+    }
+    /* 🆕 V14: Delete match → reverse ทุก lot (ไม่ลบจริง — เก็บ audit) */
+    function deleteMatch(g) {
+      const lots = (db.matchLogs||[]).filter(m => m && m.match_id === g.match_id && m.status !== 'reversed');
+      if (!lots.length) { alert('ไม่พบ lot ที่ยัง active'); return; }
+      const msg = `🗑 ลบ Match ${g.match_id}?\n\n` +
+        `❗ จะ reverse ${lots.length} lots (${g.allocated_qty.toFixed(2)} กก., ฿${g.total_cost.toFixed(2)})\n` +
+        `→ คืนของเข้า Cost Pool · ไม่ลบจริง (เก็บ audit)`;
+      if (!confirm(msg)) return;
+      lots.forEach(m => { m.status = 'reversed'; m.reversedAt = new Date().toISOString(); m.reversedBy = (erp.currentUser.value?.username||'-'); });
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+      erp.logAudit && erp.logAudit('match-reverse-delete','matchLog', null, { match_id: g.match_id, lots: lots.length });
+      erp.showToast('🗑 Reverse '+lots.length+' lots — Cost Pool คืนแล้ว','success');
+    }
+
     return { db, erp, search, filterTargetType, filterCategory, filterStatus, filterDateFrom, filterDateTo,
-      ledgerRows, stats, exportCSV, fmt:erp.fmt };
+      ledgerRows, stats, exportCSV, fmt:erp.fmt,
+      /* 🆕 V14: grouped view + drill */
+      groupedMatches, expandedMatch, toggleExpand, editMatch, deleteMatch };
   },
   template: `
   <div>
@@ -24554,55 +25294,105 @@ app.component('view-costAllocationLedger', {
       <button @click="exportCSV" class="ml-auto px-3 py-2 bg-emerald-600 text-white text-sm rounded font-medium hover:bg-emerald-700">📤 Export CSV</button>
     </div>
 
-    <!-- Table -->
-    <div class="bg-white rounded-xl shadow overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="bg-slate-100">
-          <tr>
-            <th class="p-2 text-left">Match ID</th>
-            <th class="p-2 text-center">Type</th>
-            <th class="p-2 text-left">Sale Doc</th>
-            <th class="p-2 text-left">สินค้า</th>
-            <th class="p-2 text-center">หมวด</th>
-            <th class="p-2 text-right">Sale Qty</th>
-            <th class="p-2 text-right">Allocated</th>
-            <th class="p-2 text-left">Cost Pool</th>
-            <th class="p-2 text-right">฿/กก.</th>
-            <th class="p-2 text-right">Total Cost</th>
-            <th class="p-2 text-right">Revenue</th>
-            <th class="p-2 text-right">GP</th>
-            <th class="p-2 text-right">GP%</th>
-            <th class="p-2 text-left">By</th>
-            <th class="p-2 text-center">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="ledgerRows.length===0"><td colspan="15" class="p-8 text-center text-slate-500 text-sm">ไม่มี allocation log ตรงกับ filter</td></tr>
-          <tr v-for="r in ledgerRows" :key="r.id" class="border-t hover:bg-indigo-50/30" :class="r.status==='reversed'?'opacity-50':''">
-            <td class="p-2 font-mono text-xs">{{r.match_id}}</td>
-            <td class="p-2 text-center">
-              <span v-if="r.source_type==='SPOT_SELL'" class="px-2 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800">🛒 Spot</span>
-              <span v-else class="px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700">📋 PO</span>
-            </td>
-            <td class="p-2 font-mono text-xs">{{r.sale_doc_no}}</td>
-            <td class="p-2 text-xs">{{r.product_name}}</td>
-            <td class="p-2 text-center"><span class="px-2 py-0.5 rounded text-[10px] bg-slate-100">{{r.product_category||'-'}}</span></td>
-            <td class="p-2 text-right">{{fmt(r.sale_qty)}}</td>
-            <td class="p-2 text-right text-blue-700 font-medium">{{fmt(r.allocated_qty)}}</td>
-            <td class="p-2 font-mono text-xs">{{r.cost_pool_no||'-'}}</td>
-            <td class="p-2 text-right">{{fmt(r.cost_per_kg)}}</td>
-            <td class="p-2 text-right text-red-700">฿{{fmt(r.total_cost)}}</td>
-            <td class="p-2 text-right text-emerald-700">฿{{fmt(r.allocated_revenue)}}</td>
-            <td class="p-2 text-right font-bold" :class="r.gross_profit>=0?'text-emerald-700':'text-red-600'">฿{{fmt(r.gross_profit)}}</td>
-            <td class="p-2 text-right text-xs">{{r.gp_pct.toFixed(2)}}%</td>
-            <td class="p-2 text-xs">{{r.allocated_by}}</td>
-            <td class="p-2 text-center">
-              <span v-if="r.status==='approved'" class="px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-700">✓</span>
-              <span v-else class="px-2 py-0.5 rounded text-[10px] bg-slate-200 text-slate-600">⊘ rev</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- 🆕 V14: Grouped by Match ID -->
+    <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="px-4 py-2 bg-indigo-50 border-b text-xs text-indigo-700 font-bold">
+        📒 รายการรวมต่อ Match ID — {{groupedMatches.length}} matches · กดแถวเพื่อดูรายละเอียดแต่ละ lot
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left w-8"></th>
+              <th class="p-2 text-left">Match ID</th>
+              <th class="p-2 text-center">Type</th>
+              <th class="p-2 text-left">Sale Doc</th>
+              <th class="p-2 text-left">สินค้า</th>
+              <th class="p-2 text-center">หมวด</th>
+              <th class="p-2 text-right">Lots</th>
+              <th class="p-2 text-right">รวม กก.</th>
+              <th class="p-2 text-right">ต้นทุนรวม</th>
+              <th class="p-2 text-right bg-amber-50">฿/กก. เฉลี่ย</th>
+              <th class="p-2 text-right">Revenue</th>
+              <th class="p-2 text-right">GP</th>
+              <th class="p-2 text-right">GP%</th>
+              <th class="p-2 text-center">Status</th>
+              <th class="p-2 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="groupedMatches.length===0"><td colspan="15" class="p-8 text-center text-slate-500 text-sm">ไม่มี allocation log ตรงกับ filter</td></tr>
+            <template v-for="g in groupedMatches" :key="g.match_id">
+              <tr class="border-t hover:bg-indigo-50/30 cursor-pointer" :class="g.status==='reversed'?'opacity-50':''" @click="toggleExpand(g.match_id)">
+                <td class="p-2 text-center text-indigo-400">{{expandedMatch===g.match_id?'▼':'▶'}}</td>
+                <td class="p-2 font-mono text-xs font-bold">{{g.match_id}}</td>
+                <td class="p-2 text-center">
+                  <span v-if="g.source_type==='SPOT_SELL'" class="px-2 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800">🛒 Spot</span>
+                  <span v-else class="px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700">📋 PO</span>
+                </td>
+                <td class="p-2 font-mono text-xs">{{g.sale_doc_no}}</td>
+                <td class="p-2 text-xs">{{g.product_name}}</td>
+                <td class="p-2 text-center"><span class="px-2 py-0.5 rounded text-[10px] bg-slate-100">{{g.product_category||'-'}}</span></td>
+                <td class="p-2 text-right text-xs text-slate-500">{{g.lot_count}}</td>
+                <td class="p-2 text-right font-bold text-blue-700">{{fmt(g.allocated_qty)}}</td>
+                <td class="p-2 text-right text-red-700 font-bold">฿{{fmt(g.total_cost)}}</td>
+                <td class="p-2 text-right bg-amber-50 font-bold text-amber-700">{{fmt(g.avg_cost)}}</td>
+                <td class="p-2 text-right text-emerald-700">฿{{fmt(g.allocated_revenue)}}</td>
+                <td class="p-2 text-right font-bold" :class="g.gross_profit>=0?'text-emerald-700':'text-red-600'">฿{{fmt(g.gross_profit)}}</td>
+                <td class="p-2 text-right text-xs">{{g.gp_pct.toFixed(2)}}%</td>
+                <td class="p-2 text-center">
+                  <span v-if="g.status==='approved'" class="px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-700">✓ active</span>
+                  <span v-else class="px-2 py-0.5 rounded text-[10px] bg-slate-200 text-slate-600">⊘ reversed</span>
+                </td>
+                <td class="p-2 text-center" @click.stop>
+                  <div v-if="g.status==='approved'" class="flex gap-1 justify-center">
+                    <button @click="editMatch(g)" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] rounded font-bold" title="Reverse ทั้งหมด + ไป Cost Allocator">📝 Edit</button>
+                    <button @click="deleteMatch(g)" class="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[11px] rounded font-bold" title="Reverse (ห้ามแก้บางส่วน)">🗑</button>
+                  </div>
+                  <span v-else class="text-[10px] text-slate-400">—</span>
+                </td>
+              </tr>
+              <!-- 🆕 Drill-in: lot details -->
+              <tr v-if="expandedMatch===g.match_id" class="bg-slate-50">
+                <td></td>
+                <td colspan="14" class="p-3">
+                  <div class="bg-white rounded border p-3">
+                    <div class="text-xs font-bold text-slate-600 mb-2">📋 รายละเอียด lot ภายใต้ {{g.match_id}} ({{g.lots.length}} lots)</div>
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="p-2 text-left">Cost Pool ID</th>
+                          <th class="p-2 text-left">Source No</th>
+                          <th class="p-2 text-right">qty (กก.)</th>
+                          <th class="p-2 text-right">฿/กก.</th>
+                          <th class="p-2 text-right">ต้นทุน</th>
+                          <th class="p-2 text-right">Revenue</th>
+                          <th class="p-2 text-right">GP</th>
+                          <th class="p-2 text-left">By</th>
+                          <th class="p-2 text-left">At</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="lot in g.lots" :key="lot.id" class="border-t" :class="lot.status==='reversed'?'opacity-50':''">
+                          <td class="p-2 font-mono text-[11px]">{{lot.cost_pool_id||'-'}}</td>
+                          <td class="p-2 font-mono text-[11px]">{{lot.cost_pool_no||'-'}}</td>
+                          <td class="p-2 text-right">{{fmt(lot.allocated_qty)}}</td>
+                          <td class="p-2 text-right">{{fmt(lot.cost_per_kg)}}</td>
+                          <td class="p-2 text-right text-red-700">฿{{fmt(lot.total_cost)}}</td>
+                          <td class="p-2 text-right text-emerald-700">฿{{fmt(lot.allocated_revenue)}}</td>
+                          <td class="p-2 text-right" :class="lot.gross_profit>=0?'text-emerald-700':'text-red-600'">฿{{fmt(lot.gross_profit)}}</td>
+                          <td class="p-2 text-[11px] text-slate-500">{{lot.allocated_by}}</td>
+                          <td class="p-2 text-[11px] text-slate-500">{{lot.allocated_at?lot.allocated_at.slice(0,16).replace('T',' '):'-'}}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>`
 });
@@ -25029,12 +25819,40 @@ app.component('view-matchLog', {
 app.component('view-dealMargin', {
   setup() {
     const erp = window.$erp; const db = erp.db;
-    const fromDate = ref(''); const toDate = ref(''); const filterChannel = ref('');
+    /* 🆕 V14 (2026-05-24): Enhanced filters — month, year, product + merged Compare Deal vs Stock */
+    const fromDate = ref('');
+    const toDate = ref('');
+    const filterChannel = ref('');
+    const filterProduct = ref('');
+    const filterMonth = ref('');        // YYYY-MM
+    const filterYear = ref('');         // YYYY
+    const filterMode = ref('all');      // all | month | year | custom
+
+    function applyMonth(ym) { filterMode.value = 'month'; filterMonth.value = ym; filterYear.value=''; fromDate.value=''; toDate.value=''; }
+    function applyYear(y) { filterMode.value = 'year'; filterYear.value = y; filterMonth.value=''; fromDate.value=''; toDate.value=''; }
+    function applyCustom() { filterMode.value = 'custom'; filterMonth.value=''; filterYear.value=''; }
+    function applyAll() { filterMode.value='all'; filterMonth.value=''; filterYear.value=''; fromDate.value=''; toDate.value=''; }
+
+    function _inDateScope(dateStr) {
+      if (!dateStr) return true;
+      if (filterMode.value === 'month' && filterMonth.value) return String(dateStr).slice(0,7) === filterMonth.value;
+      if (filterMode.value === 'year' && filterYear.value) return String(dateStr).slice(0,4) === filterYear.value;
+      if (filterMode.value === 'custom') {
+        if (fromDate.value && dateStr < fromDate.value) return false;
+        if (toDate.value && dateStr > toDate.value) return false;
+      }
+      return true;
+    }
+
     const list = computed(() => db.poSells.filter(p => {
       if (p.status === 'Cancelled') return false;
-      if (fromDate.value && p.date < fromDate.value) return false;
-      if (toDate.value && p.date > toDate.value) return false;
+      if (!_inDateScope(p.date)) return false;
       if (filterChannel.value && p.channelId !== filterChannel.value) return false;
+      if (filterProduct.value) {
+        const matchProd = p.productId === filterProduct.value ||
+          (p.items||[]).some(it => it && it.productId === filterProduct.value);
+        if (!matchProd) return false;
+      }
       return true;
     }).map(p => {
       const matched = erp.poSellMatchedQty(p.id);
@@ -25045,18 +25863,82 @@ app.component('view-dealMargin', {
       return {...p, matched, matchedCost, avgCost, margin, marginPct,
         status_match: matched>=Number(p.qty) ? 'Fully' : matched>0 ? 'Partial' : 'None'};
     }));
+
     const totals = computed(() => {
       const t = { revenue:0, cost:0, margin:0 };
       list.value.forEach(p => { t.revenue+=Number(p.totalRevenue||0); t.cost+=p.matchedCost; t.margin+=p.margin; });
       t.marginPct = t.revenue>0 ? t.margin/t.revenue*100 : 0;
       return t;
     });
+
+    /* 🆕 V14: Monthly performance breakdown (last 12 months in scope) */
+    const monthlyBreakdown = computed(() => {
+      const m = new Map();
+      list.value.forEach(p => {
+        const key = (p.date||'').slice(0,7) || '?';
+        if (!m.has(key)) m.set(key, { month: key, dealCount: 0, revenue: 0, cost: 0, margin: 0, qty: 0, matchedQty: 0 });
+        const g = m.get(key);
+        g.dealCount++;
+        g.revenue += Number(p.totalRevenue||0);
+        g.cost += Number(p.matchedCost||0);
+        g.margin += Number(p.margin||0);
+        g.qty += Number(p.qty||0);
+        g.matchedQty += Number(p.matched||0);
+      });
+      return Array.from(m.values()).map(g => ({ ...g,
+        marginPct: g.revenue>0 ? g.margin/g.revenue*100 : 0,
+        avgCost: g.matchedQty>0 ? g.cost/g.matchedQty : 0,
+      })).sort((a,b) => b.month.localeCompare(a.month));
+    });
+
+    /* 🆕 V14: Merged from Compare Deal vs Stock */
+    const stockTotals = computed(() => {
+      let rev=0, cost=0, billCount=0;
+      (db.salesBills||[]).filter(b => b && b.status !== 'cancelled').forEach(b => {
+        if (!_inDateScope(b.date)) return;
+        if (filterChannel.value && b.channelId !== filterChannel.value) return;
+        if (filterProduct.value) {
+          if (!(b.items||[]).some(it => it.productId === filterProduct.value)) return;
+        }
+        rev += Number(b.totalAmount||0);
+        cost += Number(b.totalCost||0);
+        billCount++;
+      });
+      return { rev, cost, margin: rev-cost, marginPct: rev>0?(rev-cost)/rev*100:0, billCount };
+    });
+    const compareTotals = computed(() => {
+      const d = totals.value;
+      const s = stockTotals.value;
+      return {
+        revenueDiff: s.rev - d.revenue,
+        costDiff: s.cost - d.cost,
+        marginDiff: s.margin - d.margin,
+      };
+    });
+
+    /* 🆕 V14: Available months/years for quick picker */
+    const availableMonths = computed(() => {
+      const s = new Set();
+      db.poSells.forEach(p => { if (p.date) s.add(p.date.slice(0,7)); });
+      return Array.from(s).sort().reverse().slice(0, 18);    // 18 months back
+    });
+    const availableYears = computed(() => {
+      const s = new Set();
+      db.poSells.forEach(p => { if (p.date) s.add(p.date.slice(0,4)); });
+      return Array.from(s).sort().reverse();
+    });
+    const dualProducts = computed(() => (db.products||[]).filter(p => p && p.active!==false));
+
     function exportCsv() {
       const rows = [['PO Sell','Date','Customer','Channel','Product','Qty','Revenue','Matched Qty','Matched Cost','Margin','Margin %']];
       list.value.forEach(p => rows.push([p.docNo, p.date, erp.customerName(p.customerId), erp.channelName(p.channelId, db.salesChannels), erp.productName(p.productId), p.qty, p.totalRevenue, p.matched, p.matchedCost, p.margin, p.marginPct.toFixed(2)]));
       downloadCsv('deal_margin_'+erp.today()+'.csv', rows);
     }
-    return { db, erp, fromDate, toDate, filterChannel, list, totals, exportCsv, fmt:erp.fmt };
+    return { db, erp, fromDate, toDate, filterChannel, filterProduct, filterMonth, filterYear, filterMode,
+      list, totals, exportCsv, fmt:erp.fmt,
+      /* 🆕 V14 */ monthlyBreakdown, stockTotals, compareTotals,
+      availableMonths, availableYears, dualProducts,
+      applyMonth, applyYear, applyCustom, applyAll };
   },
   template:`
   <div>
@@ -25122,11 +26004,111 @@ app.component('view-dealMargin', {
       <div class="bg-gradient-to-br from-purple-600 to-pink-700 text-white rounded-xl shadow p-4"><div class="text-xs opacity-80">Gross Margin (Deal)</div><div class="text-2xl font-bold">{{fmt(totals.margin)}}</div></div>
       <div class="bg-white rounded-xl shadow p-4"><div class="text-xs text-slate-500">Margin %</div><div class="text-2xl font-bold" :class="totals.marginPct>=0?'text-emerald-700':'text-red-600'">{{totals.marginPct.toFixed(2)}}%</div></div>
     </div>
-    <div class="flex flex-wrap gap-2 mb-4">
-      <input type="date" v-model="fromDate" class="px-3 py-2 border rounded-lg text-sm">
-      <input type="date" v-model="toDate" class="px-3 py-2 border rounded-lg text-sm">
-      <select v-model="filterChannel" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกช่องทาง</option><option v-for="c in db.salesChannels" :value="c.id">{{c.name}}</option></select>
-      <button @click="exportCsv" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">Export CSV</button>
+    <!-- 🆕 V14: Enhanced filters with month/year quick picker -->
+    <div class="bg-white rounded-xl shadow p-3 mb-4 space-y-2">
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-xs font-bold text-slate-600">🗓 Scope:</span>
+        <button @click="applyAll" :class="['px-3 py-1 rounded text-xs font-medium border', filterMode==='all'?'bg-slate-700 text-white border-slate-700':'bg-white border-slate-300']">ทั้งหมด</button>
+        <button @click="applyCustom" :class="['px-3 py-1 rounded text-xs font-medium border', filterMode==='custom'?'bg-blue-600 text-white border-blue-600':'bg-white border-slate-300']">📅 Custom Date</button>
+        <select :value="filterMonth" @change="applyMonth($event.target.value)" :class="['px-3 py-1 border rounded text-xs', filterMode==='month'?'bg-amber-100 border-amber-500 font-bold':'']">
+          <option value="">📆 รายเดือน</option>
+          <option v-for="m in availableMonths" :key="m" :value="m">{{m}}</option>
+        </select>
+        <select :value="filterYear" @change="applyYear($event.target.value)" :class="['px-3 py-1 border rounded text-xs', filterMode==='year'?'bg-purple-100 border-purple-500 font-bold':'']">
+          <option value="">📅 รายปี</option>
+          <option v-for="y in availableYears" :key="y" :value="y">{{y}}</option>
+        </select>
+        <template v-if="filterMode==='custom'">
+          <input type="date" v-model="fromDate" class="px-2 py-1 border rounded text-xs">
+          <span class="text-slate-400">→</span>
+          <input type="date" v-model="toDate" class="px-2 py-1 border rounded text-xs">
+        </template>
+      </div>
+      <div class="flex flex-wrap gap-2 items-center">
+        <select v-model="filterChannel" class="px-3 py-1.5 border rounded text-sm">
+          <option value="">ทุกช่องทาง</option>
+          <option v-for="c in db.salesChannels" :value="c.id">{{c.name}}</option>
+        </select>
+        <select v-model="filterProduct" class="px-3 py-1.5 border rounded text-sm min-w-[200px]">
+          <option value="">ทุกสินค้า</option>
+          <option v-for="p in dualProducts" :key="p.id" :value="p.id">{{p.code}} - {{p.name}}</option>
+        </select>
+        <span class="text-xs text-slate-500 ml-2">📊 พบ <b>{{list.length}}</b> deals</span>
+        <button @click="exportCsv" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
+      </div>
+    </div>
+
+    <!-- 🆕 V14: Compare Deal vs Stock (merged from view-compareMargin) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+      <div class="bg-gradient-to-br from-purple-600 to-pink-700 text-white rounded-2xl shadow p-4">
+        <div class="text-xs opacity-90 mb-1">💎 Deal (PO Sell + Match)</div>
+        <div class="text-sm space-y-1">
+          <div class="flex justify-between"><span class="opacity-80">Revenue</span><span class="font-bold">{{fmt(totals.revenue)}}</span></div>
+          <div class="flex justify-between"><span class="opacity-80">Matched Cost</span><span class="font-bold">{{fmt(totals.cost)}}</span></div>
+          <div class="border-t border-white/30 pt-1 flex justify-between text-base"><span>Margin</span><span class="font-bold">{{fmt(totals.margin)}}</span></div>
+          <div class="flex justify-between"><span class="opacity-80">Margin %</span><span class="font-bold">{{totals.marginPct.toFixed(2)}}%</span></div>
+        </div>
+      </div>
+      <div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl shadow p-4">
+        <div class="text-xs opacity-90 mb-1">📊 Stock (Sales Bills + WAC)</div>
+        <div class="text-sm space-y-1">
+          <div class="flex justify-between"><span class="opacity-80">Revenue (จริง)</span><span class="font-bold">{{fmt(stockTotals.rev)}}</span></div>
+          <div class="flex justify-between"><span class="opacity-80">COGS (WAC)</span><span class="font-bold">{{fmt(stockTotals.cost)}}</span></div>
+          <div class="border-t border-white/30 pt-1 flex justify-between text-base"><span>GP</span><span class="font-bold">{{fmt(stockTotals.margin)}}</span></div>
+          <div class="flex justify-between"><span class="opacity-80">GP %</span><span class="font-bold">{{stockTotals.marginPct.toFixed(2)}}%</span></div>
+        </div>
+      </div>
+      <div class="bg-white rounded-2xl shadow p-4 border-2 border-slate-300">
+        <div class="text-xs text-slate-600 mb-1">⚖ Diff (จริง − Deal)</div>
+        <div class="text-sm space-y-1">
+          <div class="flex justify-between"><span class="text-slate-500">Revenue Diff</span><span class="font-bold" :class="compareTotals.revenueDiff>=0?'text-emerald-700':'text-red-600'">{{fmt(compareTotals.revenueDiff)}}</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">Cost Diff</span><span class="font-bold" :class="compareTotals.costDiff<=0?'text-emerald-700':'text-red-600'">{{fmt(compareTotals.costDiff)}}</span></div>
+          <div class="border-t border-slate-300 pt-1 flex justify-between text-base"><span>Margin Diff</span><span class="font-bold" :class="compareTotals.marginDiff>=0?'text-emerald-700':'text-red-600'">{{fmt(compareTotals.marginDiff)}}</span></div>
+          <div class="text-[10px] text-slate-400 italic mt-1">+ = ดีกว่าคาด · − = แย่กว่าคาด<br/>(มาจาก: ตัด cost ต่าง, รับของบางส่วน, WAC เปลี่ยน, FX)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 V14: Monthly Performance Breakdown -->
+    <div v-if="monthlyBreakdown.length > 0" class="bg-white rounded-xl shadow mb-4">
+      <div class="px-4 py-3 border-b bg-amber-50 flex items-center justify-between">
+        <h3 class="font-bold text-amber-900">📆 Performance รายเดือน — Deal Margin</h3>
+        <span class="text-xs text-slate-500">{{monthlyBreakdown.length}} เดือน</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left">เดือน</th>
+              <th class="p-2 text-right">Deals</th>
+              <th class="p-2 text-right">Qty (กก.)</th>
+              <th class="p-2 text-right">Matched Qty</th>
+              <th class="p-2 text-right">Avg Cost ฿/กก.</th>
+              <th class="p-2 text-right">Revenue</th>
+              <th class="p-2 text-right">Matched Cost</th>
+              <th class="p-2 text-right">Margin</th>
+              <th class="p-2 text-right">Margin %</th>
+              <th class="p-2 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in monthlyBreakdown" :key="m.month" class="border-t hover:bg-amber-50/30">
+              <td class="p-2 font-mono font-bold">{{m.month}}</td>
+              <td class="p-2 text-right">{{m.dealCount}}</td>
+              <td class="p-2 text-right">{{fmt(m.qty)}}</td>
+              <td class="p-2 text-right text-blue-700">{{fmt(m.matchedQty)}}</td>
+              <td class="p-2 text-right">{{fmt(m.avgCost)}}</td>
+              <td class="p-2 text-right text-emerald-700">{{fmt(m.revenue)}}</td>
+              <td class="p-2 text-right text-red-700">{{fmt(m.cost)}}</td>
+              <td class="p-2 text-right font-bold" :class="m.margin>=0?'text-emerald-700':'text-red-600'">{{fmt(m.margin)}}</td>
+              <td class="p-2 text-right" :class="m.marginPct>=0?'text-emerald-700':'text-red-600'">{{m.marginPct.toFixed(2)}}%</td>
+              <td class="p-2 text-center">
+                <button @click="applyMonth(m.month)" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white text-[11px] rounded font-bold">🔍 Drill</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <div class="bg-white rounded-xl shadow overflow-x-auto">
       <table class="w-full text-sm table-zebra">
@@ -27195,6 +28177,263 @@ app.component('view-pendingSales', {
         try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e) {}
       }
     }
+    /* 🆕 V11 (2026-05-24): Live fetch USD/THB + LME — try real APIs, fall back gracefully */
+    const fetchLoading = ref(false);
+    async function fetchLiveRates() {
+      fetchLoading.value = true;
+      const messages = [];
+      try {
+        // 1. USD/THB → exchangerate.host (no auth, CORS-friendly)
+        try {
+          const fxRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+          if (fxRes.ok) {
+            const j = await fxRes.json();
+            const thb = j.rates && j.rates.THB ? Number(j.rates.THB) : 0;
+            if (thb > 0) { db.lmeConfig.fxRate = +thb.toFixed(4); messages.push('💱 USD/THB = '+thb.toFixed(4)); }
+          }
+        } catch(e1) {
+          try {
+            const r2 = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=THB');
+            if (r2.ok) {
+              const j = await r2.json();
+              const thb = j.rates && j.rates.THB ? Number(j.rates.THB) : 0;
+              if (thb > 0) { db.lmeConfig.fxRate = +thb.toFixed(4); messages.push('💱 USD/THB = '+thb.toFixed(4)+' (fallback)'); }
+            }
+          } catch(e2) { messages.push('⚠️ FX fetch failed — กรอกเอง'); }
+        }
+        // 2. LME Copper + Aluminum spot → metals.live (no auth) — returns USD/ounce
+        try {
+          const mRes = await fetch('https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz');
+          if (mRes.ok) {
+            const j = await mRes.json();
+            // metals.dev returns metals.copper in USD/oz → convert to USD/MT (×35273.96 troy oz per MT)
+            const copperOz = j?.metals?.copper || 0;
+            const alOz = j?.metals?.aluminum || 0;
+            if (copperOz > 0) { db.lmeConfig.lmeCopperUSD = Math.round(copperOz * 32150.7); messages.push('🥉 Copper ≈ '+db.lmeConfig.lmeCopperUSD+' USD/MT'); }
+            if (alOz > 0) { db.lmeConfig.lmeAluminumUSD = Math.round(alOz * 32150.7); messages.push('⚪ Aluminum ≈ '+db.lmeConfig.lmeAluminumUSD+' USD/MT'); }
+          }
+        } catch(e3) {
+          messages.push('⚠️ LME fetch failed — แก้ราคา LME เอง (ไม่ทุก API ฟรี/CORS-friendly)');
+        }
+        db.lmeConfig.updatedAt = new Date().toISOString();
+        db.lmeConfig.updatedBy = (erp.currentUser.value?.username||'live-fetch') + ' (live)';
+        try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+        erp.showToast(messages.length ? messages.join(' · ') : '⚠️ Live fetch failed — ใช้ค่าเดิม', messages.length>0 ? 'success' : 'error');
+      } finally { fetchLoading.value = false; }
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       🆕 V11 (2026-05-24): SALES PLAN — รวมเข้าหน้านี้
+       ════════════════════════════════════════════════════════════════ */
+    if (db.lmeConfig.kgPerContainer === undefined) db.lmeConfig.kgPerContainer = 25000;
+    const planMonth = ref(erp.today().slice(0,7));
+    const planFilterGroup = ref('');
+    const planFilterChannel = ref('');
+    function lmeBaseSP(metalGroup) {
+      const g = String(metalGroup||'').toLowerCase();
+      if (g.indexOf('ทองแดง')>=0 || g.indexOf('copper')>=0) return Number(db.lmeConfig.lmeCopperUSD||0);
+      if (g.indexOf('ทองเหลือง')>=0 || g.indexOf('brass')>=0) return Number(db.lmeConfig.lmeBrassUSD||0);
+      return 0;
+    }
+    const planPlans = computed(() => {
+      return _trkSafe(db.salesPlans).filter(p => {
+        if (!p) return false;
+        if (p.month !== planMonth.value) return false;
+        if (planFilterChannel.value && (p.channel||'') !== planFilterChannel.value) return false;
+        if (planFilterGroup.value) {
+          const prod = _trkSafe(db.products).find(x => x && x.id === p.productId);
+          const g = prod?.metalGroup || '';
+          if (planFilterGroup.value === 'ทองแดง' && !g.includes('ทองแดง')) return false;
+          if (planFilterGroup.value === 'ทองเหลือง' && !g.includes('ทองเหลือง')) return false;
+        }
+        return true;
+      });
+    });
+    const planEnriched = computed(() => {
+      return planPlans.value.map(p => {
+        const prod = _trkSafe(db.products).find(x => x && x.id === p.productId);
+        const cust = _trkSafe(db.customers).find(x => x && x.id === p.customerId);
+        const metalGroup = prod?.metalGroup || '';
+        const isLocked = p.status === 'locked';
+        const lme = isLocked ? Number(p.lockedLme||0) : lmeBaseSP(metalGroup);
+        const fx = isLocked ? Number(p.lockedFx||0) : Number(db.lmeConfig.fxRate||0);
+        const sellPctLme = Number(p.sellPctLme||0);
+        const totalKg = Number(p.containers||0) * Number(p.kgPerContainer||db.lmeConfig.kgPerContainer||25000);
+        const sellPrice = lme > 0 && fx > 0 && sellPctLme > 0 ? (lme/1000) * fx * sellPctLme/100 : 0;
+        return { p, id: p.id, prod, cust, metalGroup, lme, fx, totalKg, sellPrice, isLocked,
+          containers: Number(p.containers||0), sellPctLme,
+          productName: prod?.name || '-', productCode: prod?.code || '-',
+          customerName: cust?.name || '-',
+          channelLabel: p.channel === 'export' ? '🌍 ส่งออก' : (p.channel === 'domestic' ? '🇹🇭 ในประเทศ' : '-') };
+      });
+    });
+    const planSummary = computed(() => {
+      const lst = planEnriched.value;
+      const lockedLst = lst.filter(r => r.isLocked);
+      const pendingLst = lst.filter(r => !r.isLocked);
+      return { plansCount: lst.length, lockedCount: lockedLst.length, pendingCount: pendingLst.length,
+        totalContainers: lst.reduce((s,r)=>s+r.containers,0),
+        totalKg: lst.reduce((s,r)=>s+r.totalKg,0),
+        avgPctLme: lst.length ? lst.reduce((s,r)=>s+r.sellPctLme,0)/lst.length : 0 };
+    });
+    function planSave() { try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e) {} }
+    function planAdd() {
+      if (!Array.isArray(db.salesPlans)) db.salesPlans = [];
+      db.salesPlans.push({
+        id: 'SP-'+Date.now()+Math.random().toString(36).slice(2,5),
+        month: planMonth.value, productId: '', customerId: '',
+        channel: 'export', containers: 1,
+        kgPerContainer: db.lmeConfig.kgPerContainer || 25000,
+        sellPctLme: 0, lockedLme: 0, lockedFx: 0,
+        notes: '', status: 'pending', createdAt: new Date().toISOString(),
+      });
+      planSave();
+    }
+    function planRemove(p) {
+      if (!confirm('ลบรายการนี้?')) return;
+      db.salesPlans = db.salesPlans.filter(x => x && x.id !== p.id);
+      planSave();
+    }
+    function planLock(p) {
+      const idx = db.salesPlans.findIndex(x => x && x.id === p.id);
+      if (idx < 0) return;
+      const target = db.salesPlans[idx];
+      if (target.status === 'locked') {
+        target.status = 'pending'; target.lockedAt = null; planSave();
+        erp.showToast('🔓 ปลดล็อก','success');
+      } else {
+        const prod = _trkSafe(db.products).find(x => x && x.id === target.productId);
+        if (!prod) { alert('เลือกสินค้าก่อนล็อก'); return; }
+        if (Number(target.sellPctLme||0) <= 0) { alert('กรอก % LME ก่อนล็อก'); return; }
+        if (Number(target.lockedLme||0) <= 0) target.lockedLme = lmeBaseSP(prod.metalGroup);
+        if (Number(target.lockedFx||0) <= 0) target.lockedFx = Number(db.lmeConfig.fxRate||0);
+        target.status = 'locked'; target.lockedAt = new Date().toISOString();
+        planSave();
+        const price = (target.lockedLme/1000)*target.lockedFx*target.sellPctLme/100;
+        erp.showToast('🔒 ล็อกที่ '+erp.fmt(price)+' ฿/กก.','success');
+      }
+    }
+    /* 🆕 V12 (2026-05-24): QUICK BOOK PO SELL — สร้าง PO Sell จากหน้านี้ ใส่ LME locked + USD price */
+    const showQuickBook = ref(false);
+    const quickBook = reactive({
+      customerId: '', productId: '', qty: 0, deliveryDate: '',
+      lockedLmeUsd: 0,       // ราคา LME ที่ล๊อก (USD/MT)
+      lockedFx: 0,           // เรท USD/THB ที่ล๊อก ณ วันที่ล๊อก
+      sellPriceUsd: 0,       // ราคาขาย (USD/kg)
+      channel: 'export',
+      note: '',
+    });
+    function openQuickBook() {
+      Object.assign(quickBook, {
+        customerId: '', productId: '', qty: 0, deliveryDate: '',
+        lockedLmeUsd: 0,
+        lockedFx: Number(db.lmeConfig.fxRate||0),
+        sellPriceUsd: 0,
+        channel: 'export', note: '',
+      });
+      showQuickBook.value = true;
+    }
+    /* คำนวณราคา THB/kg = USD/kg × FX (live) */
+    const quickBookCalc = computed(() => {
+      const usd = Number(quickBook.sellPriceUsd||0);
+      const fx = Number(quickBook.lockedFx||0);
+      const qty = Number(quickBook.qty||0);
+      const thbPerKg = usd > 0 && fx > 0 ? usd * fx : 0;
+      const totalRevenueThb = qty * thbPerKg;
+      const totalRevenueUsd = qty * usd;
+      // % LME ที่เทียบจาก locked LME — ราคาขาย USD/kg เทียบ LME USD/MT
+      // sellPriceUsd (USD/kg) ÷ (lockedLmeUsd/1000) × 100
+      const pctLme = Number(quickBook.lockedLmeUsd||0) > 0 && usd > 0
+        ? usd / (Number(quickBook.lockedLmeUsd)/1000) * 100 : 0;
+      return { thbPerKg, totalRevenueThb, totalRevenueUsd, pctLme };
+    });
+    async function submitQuickBook() {
+      if (!quickBook.customerId) { alert('เลือกลูกค้า'); return; }
+      if (!quickBook.productId) { alert('เลือกสินค้า'); return; }
+      if (Number(quickBook.qty||0) <= 0) { alert('ใส่จำนวน (กก.)'); return; }
+      if (Number(quickBook.sellPriceUsd||0) <= 0) { alert('ใส่ราคาขาย USD/kg'); return; }
+      if (Number(quickBook.lockedFx||0) <= 0) { alert('ใส่เรท FX (USD/THB)'); return; }
+      const calc = quickBookCalc.value;
+      const docNo = erp.nextDocNo ? erp.nextDocNo('POS') : 'POS-Q-'+Date.now();
+      const newPO = {
+        id: erp.uid ? erp.uid('POS') : 'POS-'+Date.now()+Math.random().toString(36).slice(2,5),
+        docNo, date: erp.today(),
+        customerId: quickBook.customerId,
+        productId: quickBook.productId,
+        branchId: '', channelId: '',
+        channel: quickBook.channel,
+        items: [{
+          id: 'PSI-'+Date.now(),
+          productId: quickBook.productId,
+          qty: Number(quickBook.qty),
+          unitPrice: calc.thbPerKg,
+          totalRevenue: calc.totalRevenueThb,
+        }],
+        qty: Number(quickBook.qty),
+        unitPrice: calc.thbPerKg,
+        totalRevenue: calc.totalRevenueThb,
+        deliveryDate: quickBook.deliveryDate || '',
+        status: 'Open',
+        note: quickBook.note || '',
+        /* 🆕 V12: เก็บ FX/LME metadata สำหรับ track foreign-currency P&L */
+        lockedLmeUsd: Number(quickBook.lockedLmeUsd||0),
+        lockedFxAtBooking: Number(quickBook.lockedFx||0),
+        sellPriceUsdPerKg: Number(quickBook.sellPriceUsd||0),
+        sellPctLme: calc.pctLme,
+        totalRevenueUsd: calc.totalRevenueUsd,
+        bookingMode: 'QUICK_BOOK_LME',
+        createdBy: erp.currentUser.value?.username||'-',
+        createdAt: new Date().toISOString(),
+      };
+      if (!Array.isArray(db.poSells)) db.poSells = [];
+      db.poSells.push(newPO);
+      try { localStorage.setItem('ns_erp_db_v1', JSON.stringify(db)); } catch(e){}
+      erp.logAudit && erp.logAudit('quick-book-po','poSell', null, newPO);
+      erp.showToast('✓ จอง PO Sell '+docNo+' — '+fmt(calc.thbPerKg)+' ฿/กก. ('+calc.pctLme.toFixed(1)+'% LME)', 'success');
+      showQuickBook.value = false;
+      // 🆕 force push to cloud
+      try { if (window.$autoSync && window.$autoSync.pushNow) await window.$autoSync.pushNow(); } catch(e){}
+    }
+
+    /* 🆕 V11: best price proposal สำหรับสินค้าใน pendingSaleTable (จาก Sales Plan) */
+    function bestPlanPriceFor(productId) {
+      try {
+        const prod = (db.products||[]).find(x => x && x.id === productId);
+        if (!prod) return { price: 0, pct: 0, customer: '' };
+        const lme = lmeBaseSP(prod.metalGroup);
+        const fx = Number(db.lmeConfig.fxRate||0);
+        if (lme <= 0 || fx <= 0) return { price: 0, pct: 0, customer: '' };
+        // เอาทุกแผนของสินค้านี้ในเดือนปัจจุบัน (locked + pending)
+        const candidates = _trkSafe(db.salesPlans).filter(p =>
+          p && p.month === planMonth.value && p.productId === productId && Number(p.sellPctLme||0) > 0
+        );
+        let best = { price: 0, pct: 0, customer: '', isLocked: false };
+        candidates.forEach(p => {
+          const useLme = p.status==='locked' ? Number(p.lockedLme||0) : lme;
+          const useFx = p.status==='locked' ? Number(p.lockedFx||0) : fx;
+          const pct = Number(p.sellPctLme||0);
+          const price = useLme>0 && useFx>0 ? (useLme/1000)*useFx*pct/100 : 0;
+          if (price > best.price) {
+            const cust = (db.customers||[]).find(x => x && x.id === p.customerId);
+            best = { price, pct, customer: cust?.name||'-', isLocked: p.status==='locked' };
+          }
+        });
+        return best;
+      } catch(e) { return { price: 0, pct: 0, customer: '' }; }
+    }
+    /* enrichedPendingSale — ใส่ bestPlanPrice + comparison vs Cost Pool avg cost */
+    const pendingSaleEnriched = computed(() => {
+      return pendingSaleTable.value.map(r => {
+        const best = bestPlanPriceFor(r.productId);
+        // ราคาต้นทุน Cost Pool (avg) — ใช้ pool avg ของสินค้านี้
+        const poolUnitCost = r.avgPrice || (r.stockWAC || 0);
+        const margin = best.price > 0 ? (best.price - poolUnitCost) * r.pendingSaleQty : 0;
+        const marginPct = best.price > 0 && poolUnitCost > 0 ? ((best.price - poolUnitCost)/poolUnitCost)*100 : 0;
+        return { ...r,
+          bestPrice: best.price, bestPct: best.pct, bestCustomer: best.customer, bestIsLocked: best.isLocked,
+          poolUnitCost, margin, marginPct };
+      });
+    });
 
     function exportCsv() {
       const rows = [['Product','Group','PO Count','Sold Qty','Remain Qty','Avg Price','WAC','LME Target','Gain vs WAC','Gain vs LME','LME %']];
@@ -27440,7 +28679,16 @@ app.component('view-pendingSales', {
       // 🆕 Cost Pool vs Stock
       costPoolReconciliation, reconRM, reconFG, reconWIP, reconTotals, exportReconCsv,
       // 🆕 PATCH 28 — ตารางรอขาย (ทองแดง/ทองเหลือง)
-      pendingSaleTable, pendingSaleTotals, exportPendingSaleCsv };
+      pendingSaleTable, pendingSaleTotals, exportPendingSaleCsv,
+      // 🆕 V11 (2026-05-24): Live LME fetch
+      fetchLoading, fetchLiveRates,
+      // 🆕 V11: Sales Plan (merged)
+      planMonth, planFilterGroup, planFilterChannel, planEnriched, planSummary,
+      planAdd, planRemove, planLock, planSave, lmeBaseSP,
+      // 🆕 V11: Pending sales + best price proposal
+      pendingSaleEnriched, bestPlanPriceFor,
+      // 🆕 V12 (2026-05-24): Quick Book PO Sell
+      showQuickBook, quickBook, quickBookCalc, openQuickBook, submitQuickBook };
   },
   template: `
   <div class="space-y-3">
@@ -27449,13 +28697,19 @@ app.component('view-pendingSales', {
       <p class="text-sm opacity-80 mt-1">สรุปสินค้าที่รอขาย · เปรียบเทียบกับราคา LME · กำไร/ขาดทุน · Cost Pool vs Stock</p>
     </div>
 
-    <!-- LME CONFIG -->
+    <!-- 🆕 V11: LME REFERENCE PRICING + Live Fetch -->
     <div class="bg-white rounded-xl shadow p-4">
-      <div class="flex justify-between items-center mb-3">
-        <h3 class="font-bold text-slate-700">📊 LME Reference Pricing</h3>
-        <button @click="saveLme" class="bg-blue-600 text-white px-3 py-1 rounded text-xs">💾 บันทึก</button>
+      <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+        <h3 class="font-bold text-slate-700">📊 LME Reference Pricing <span class="text-xs text-slate-400 font-normal">(Real-time + Manual)</span></h3>
+        <div class="flex gap-2">
+          <button @click="fetchLiveRates" :disabled="fetchLoading" class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold disabled:opacity-50">
+            <span v-if="fetchLoading">⏳ กำลังดึง...</span>
+            <span v-else>🔄 Fetch Live (USD/THB + Metals)</span>
+          </button>
+          <button @click="saveLme" class="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold">💾 บันทึก</button>
+        </div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div>
           <label class="text-xs text-slate-500">🥉 ทองแดง LME (USD/MT)</label>
           <input type="number" step="0.01" v-model.number="db.lmeConfig.lmeCopperUSD" class="w-full px-2 py-1.5 border rounded text-right text-base font-bold">
@@ -27469,44 +28723,220 @@ app.component('view-pendingSales', {
           <input type="number" step="0.01" v-model.number="db.lmeConfig.lmeAluminumUSD" class="w-full px-2 py-1.5 border rounded text-right text-base font-bold">
         </div>
         <div>
-          <label class="text-xs text-slate-500">💱 เรท USD/THB</label>
+          <label class="text-xs text-slate-500">💱 USD/THB</label>
           <input type="number" step="0.0001" v-model.number="db.lmeConfig.fxRate" class="w-full px-2 py-1.5 border rounded text-right text-base font-bold">
         </div>
+        <div>
+          <label class="text-xs text-slate-500">📦 กก./ตู้</label>
+          <input type="number" v-model.number="db.lmeConfig.kgPerContainer" class="w-full px-2 py-1.5 border rounded text-right text-base font-bold">
+        </div>
       </div>
-      <div v-if="db.lmeConfig.updatedAt" class="text-xs text-slate-400 mt-2">⏰ อัปเดตล่าสุด: {{db.lmeConfig.updatedAt.slice(0,16).replace('T',' ')}} โดย {{db.lmeConfig.updatedBy||'-'}}</div>
+      <div v-if="db.lmeConfig.updatedAt" class="text-xs text-slate-500 mt-2 flex items-center gap-2">
+        <span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded font-medium">⏰ {{db.lmeConfig.updatedAt.slice(0,16).replace('T',' ')}}</span>
+        โดย {{db.lmeConfig.updatedBy||'-'}}
+      </div>
+      <div class="text-[10px] text-slate-400 mt-1 italic">
+        💡 Live fetch: USD/THB จาก exchangerate-api · Metals จาก metals.dev (demo key) — ถ้า fetch fail ให้กรอกเอง · ราคา LME อย่างเป็นทางการต้อง subscribe LME directly
+      </div>
     </div>
 
-    <!-- LME % per product setting — เฉพาะทองแดง / ทองเหลือง -->
-    <details class="bg-white rounded-xl shadow">
-      <summary class="cursor-pointer p-3 font-bold text-slate-700">📋 ตั้งค่า "ผู้ซื้อซื้อที่ LME กี่ %" ต่อสินค้า — เฉพาะ 🥉 ทองแดง / 🌟 ทองเหลือง ({{lmeProductsCuBr.length}} รายการ)</summary>
-      <div class="p-3 overflow-x-auto">
+    <!-- 🆕 V12 (2026-05-24): QUICK BOOK PO SELL — จองดีลด่วนจาก LME -->
+    <div class="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-300 rounded-xl p-4 shadow">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 class="font-bold text-purple-900 text-lg">🎯 Quick Book PO Sell — จอง PO ขาย Lock LME ทันที</h3>
+          <p class="text-xs text-purple-700 mt-1">ใส่: ลูกค้า · สินค้า · จำนวน · LME ที่ล๊อก (USD/MT) · ราคาขาย USD/kg · FX (USD/THB) → กดสร้าง PO Sell ทันที</p>
+        </div>
+        <button @click="openQuickBook" class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-lg">
+          + จอง PO ขาย (Lock LME)
+        </button>
+      </div>
+    </div>
+
+    <!-- 🆕 V12: Quick Book Modal -->
+    <div v-if="showQuickBook" class="fixed inset-0 z-50 modal-backdrop p-4 overflow-y-auto" style="background:rgba(0,0,0,0.5)">
+      <div class="bg-white rounded-xl shadow-2xl max-w-2xl mx-auto my-4">
+        <div class="px-5 py-3 border-b bg-gradient-to-r from-purple-600 to-pink-600 text-white flex justify-between items-center">
+          <h3 class="font-bold">🎯 จอง PO Sell — Lock LME @ {{db.lmeConfig.updatedAt?db.lmeConfig.updatedAt.slice(0,10):erp.today()}}</h3>
+          <button @click="showQuickBook=false" class="text-white text-2xl hover:opacity-80">&times;</button>
+        </div>
+        <div class="p-5 space-y-3 text-sm">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2">
+              <label class="text-xs font-bold text-slate-600">ลูกค้า *</label>
+              <select v-model="quickBook.customerId" class="w-full px-2 py-1.5 border rounded">
+                <option value="">-- เลือกลูกค้า --</option>
+                <option v-for="c in db.customers.filter(x=>x && x.active!==false)" :key="c.id" :value="c.id">{{c.code||''}} - {{c.name}}</option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs font-bold text-slate-600">สินค้า *</label>
+              <select v-model="quickBook.productId" class="w-full px-2 py-1.5 border rounded">
+                <option value="">-- เลือกสินค้า --</option>
+                <option v-for="p in lmeProductsCuBr" :key="p.id" :value="p.id">{{p.code}} - {{p.name}} ({{p.metalGroup}})</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">ช่องทาง</label>
+              <select v-model="quickBook.channel" class="w-full px-2 py-1.5 border rounded">
+                <option value="export">🌍 ส่งออก</option>
+                <option value="domestic">🇹🇭 ในประเทศ</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">วันส่ง</label>
+              <input type="date" v-model="quickBook.deliveryDate" class="w-full px-2 py-1.5 border rounded">
+            </div>
+            <div>
+              <label class="text-xs font-bold text-slate-600">จำนวน (กก.) *</label>
+              <input type="number" step="0.01" v-model.number="quickBook.qty" class="w-full px-2 py-1.5 border rounded text-right font-bold">
+            </div>
+            <div></div>
+          </div>
+
+          <!-- LME + FX block -->
+          <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+            <div class="text-xs font-bold text-amber-800">📊 LME Locked Pricing (กรอกมือ ณ วันที่ล๊อก)</div>
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="text-xs text-slate-600">LME ที่ล๊อก (USD/MT)</label>
+                <input type="number" step="0.01" v-model.number="quickBook.lockedLmeUsd" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 9500">
+              </div>
+              <div>
+                <label class="text-xs text-slate-600">ราคาขาย (USD/kg) *</label>
+                <input type="number" step="0.0001" v-model.number="quickBook.sellPriceUsd" class="w-full px-2 py-1.5 border rounded text-right font-bold bg-amber-50" placeholder="เช่น 8.5">
+              </div>
+              <div>
+                <label class="text-xs text-slate-600">FX (USD/THB) *</label>
+                <input type="number" step="0.0001" v-model.number="quickBook.lockedFx" class="w-full px-2 py-1.5 border rounded text-right font-bold" placeholder="เช่น 36.5">
+              </div>
+            </div>
+          </div>
+
+          <!-- Calc preview -->
+          <div class="bg-emerald-50 border border-emerald-300 rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <div class="text-xs text-slate-600">% LME (คำนวณ)</div>
+              <div class="text-lg font-bold text-amber-700">{{quickBookCalc.pctLme.toFixed(2)}}%</div>
+            </div>
+            <div>
+              <div class="text-xs text-slate-600">ราคา THB/kg</div>
+              <div class="text-lg font-bold text-blue-700">{{fmt(quickBookCalc.thbPerKg)}}</div>
+            </div>
+            <div>
+              <div class="text-xs text-slate-600">รวม USD</div>
+              <div class="text-lg font-bold text-purple-700">{{fmt(quickBookCalc.totalRevenueUsd)}}</div>
+            </div>
+            <div>
+              <div class="text-xs text-slate-600">รวม THB</div>
+              <div class="text-lg font-bold text-emerald-700">{{fmt(quickBookCalc.totalRevenueThb)}}</div>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-bold text-slate-600">หมายเหตุ</label>
+            <input v-model="quickBook.note" class="w-full px-2 py-1.5 border rounded" placeholder="ระบุเงื่อนไข/Incoterms/อื่นๆ">
+          </div>
+        </div>
+        <div class="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2">
+          <button @click="showQuickBook=false" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-200 rounded">ยกเลิก</button>
+          <button @click="submitQuickBook" class="px-5 py-2 text-sm bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded font-bold">
+            ✓ สร้าง PO Sell + Lock LME
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 V11: SALES PLAN (merged from view-salesPlan) — เพิ่มรายการเฉพาะที่มี order/% LME -->
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center flex-wrap gap-2">
+        <div>
+          <h3 class="font-bold text-amber-900">📋 วางแผนการขาย (Sales Plan) — ทองแดง / ทองเหลือง</h3>
+          <p class="text-xs text-amber-700">เสนอ % LME + ช่องทาง → 🔒 Lock เพื่อยืนยันราคา · <b>เพิ่มแค่ที่มี order/ลูกค้าเสนอ %</b> (ไม่ต้องกรอกทุกสินค้า)</p>
+        </div>
+        <button @click="planAdd" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ เพิ่มแผน</button>
+      </div>
+      <!-- Filter -->
+      <div class="px-4 py-3 border-b flex flex-wrap gap-2 items-center text-sm">
+        <label>เดือน</label>
+        <input type="month" v-model="planMonth" class="px-2 py-1.5 border rounded">
+        <select v-model="planFilterGroup" class="px-2 py-1.5 border rounded">
+          <option value="">ทุกหมวด</option>
+          <option value="ทองแดง">🥉 ทองแดง</option>
+          <option value="ทองเหลือง">🌟 ทองเหลือง</option>
+        </select>
+        <select v-model="planFilterChannel" class="px-2 py-1.5 border rounded">
+          <option value="">ทุกช่องทาง</option>
+          <option value="export">🌍 ส่งออก</option>
+          <option value="domestic">🇹🇭 ในประเทศ</option>
+        </select>
+        <span class="text-xs text-slate-500">📊 {{planSummary.plansCount}} แผน · {{planSummary.lockedCount}} Locked · {{planSummary.pendingCount}} Pending · เฉลี่ย {{planSummary.avgPctLme.toFixed(1)}}% LME · รวม {{fmt(planSummary.totalKg)}} กก. ({{planSummary.totalContainers}} ตู้)</span>
+      </div>
+      <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-slate-100"><tr>
-            <th class="p-2 text-left">รหัส</th>
-            <th class="p-2 text-left">สินค้า</th>
-            <th class="p-2 text-left">หมวด</th>
-            <th class="p-2 text-right">LME ฐาน (USD/MT)</th>
-            <th class="p-2 text-right">% ที่ซื้อ</th>
-            <th class="p-2 text-right">ราคาเป้า (THB/กก.)</th>
-            <th class="p-2 text-right">WAC ปัจจุบัน</th>
-            <th class="p-2 text-right">Diff</th>
-          </tr></thead>
-          <tbody>
-            <tr v-for="p in lmeProductsCuBr" :key="p.id" class="border-t">
-              <td class="p-2 font-mono text-xs">{{p.code}}</td>
-              <td class="p-2">{{p.name}}</td>
-              <td class="p-2 text-xs">{{p.metalGroup||'-'}}</td>
-              <td class="p-2 text-right text-xs text-slate-500">{{lmeBaseFor(p.metalGroup)?fmt(lmeBaseFor(p.metalGroup)):'-'}}</td>
-              <td class="p-2"><input type="number" step="0.01" :value="p.lmeBuyPercent||0" @change="saveLmePercent(p.id, $event.target.value)" class="w-24 px-2 py-1 border rounded text-right" placeholder="0">%</td>
-              <td class="p-2 text-right font-bold text-blue-700">{{lmeTargetForProduct(p)?fmt(lmeTargetForProduct(p)):'-'}}</td>
-              <td class="p-2 text-right">{{fmt(erp.avgCost(p.id))}}</td>
-              <td class="p-2 text-right text-xs" :class="wacVsLme(p.id)<=0?'text-emerald-700':'text-red-600'">{{lmeTargetForProduct(p)>0?fmt(wacVsLme(p.id)):'-'}}</td>
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left min-w-[180px]">สินค้า</th>
+              <th class="p-2 text-center w-28">ช่องทาง</th>
+              <th class="p-2 text-left min-w-[150px]">ลูกค้า</th>
+              <th class="p-2 text-right w-20">ตู้</th>
+              <th class="p-2 text-right w-24">กก./ตู้</th>
+              <th class="p-2 text-right w-28">รวม กก.</th>
+              <th class="p-2 text-right w-20 bg-amber-50">% LME</th>
+              <th class="p-2 text-right w-24">LME (USD/MT)</th>
+              <th class="p-2 text-right w-20">FX</th>
+              <th class="p-2 text-right w-28 bg-emerald-50">ราคา (THB/kg)</th>
+              <th class="p-2 text-center w-28">สถานะ</th>
+              <th class="w-8"></th>
             </tr>
-            <tr v-if="!lmeProductsCuBr.length"><td colspan="8" class="text-center py-6 text-slate-400">ไม่มีสินค้าหมวดทองแดง/ทองเหลือง</td></tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in planEnriched" :key="row.id" class="border-t hover:bg-amber-50/30" :class="row.isLocked?'bg-emerald-50/30':''">
+              <td class="p-1">
+                <select v-model="row.p.productId" @change="planSave" :disabled="row.isLocked" class="w-full px-2 py-1 border rounded text-sm" :class="row.isLocked?'bg-slate-100':''">
+                  <option value="">-เลือกสินค้า-</option>
+                  <option v-for="prod in lmeProductsCuBr" :key="prod.id" :value="prod.id">{{prod.code}} - {{prod.name}}</option>
+                </select>
+              </td>
+              <td class="p-1">
+                <select v-model="row.p.channel" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-xs" :class="row.isLocked?'bg-slate-100':''">
+                  <option value="export">🌍 ส่งออก</option>
+                  <option value="domestic">🇹🇭 ในประเทศ</option>
+                </select>
+              </td>
+              <td class="p-1">
+                <select v-model="row.p.customerId" @change="planSave" class="w-full px-2 py-1 border rounded text-sm">
+                  <option value="">-เลือกลูกค้า-</option>
+                  <option v-for="c in db.customers.filter(x=>x && x.active!==false)" :key="c.id" :value="c.id">{{c.name}}</option>
+                </select>
+              </td>
+              <td class="p-1"><input type="number" step="0.1" v-model.number="row.p.containers" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right" :class="row.isLocked?'bg-slate-100':''"></td>
+              <td class="p-1"><input type="number" v-model.number="row.p.kgPerContainer" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right text-xs" :class="row.isLocked?'bg-slate-100':''"></td>
+              <td class="p-1 text-right font-medium">{{fmt(row.totalKg)}}</td>
+              <td class="p-1"><input type="number" step="0.01" v-model.number="row.p.sellPctLme" @change="planSave" :disabled="row.isLocked" class="w-full px-1 py-1 border rounded text-right bg-amber-50 font-bold" :class="row.isLocked?'opacity-70':''" placeholder="0"></td>
+              <td class="p-1">
+                <input v-if="row.isLocked" type="number" v-model.number="row.p.lockedLme" @change="planSave" class="w-full px-1 py-1 border rounded text-right text-xs bg-emerald-50 font-bold">
+                <span v-else class="text-xs text-slate-500">{{fmt(row.lme)}}</span>
+              </td>
+              <td class="p-1">
+                <input v-if="row.isLocked" type="number" step="0.01" v-model.number="row.p.lockedFx" @change="planSave" class="w-full px-1 py-1 border rounded text-right text-xs bg-emerald-50 font-bold">
+                <span v-else class="text-xs text-slate-500">{{fmt(row.fx)}}</span>
+              </td>
+              <td class="p-1 text-right font-bold bg-emerald-50 text-emerald-700">{{row.sellPrice?fmt(row.sellPrice):'-'}}</td>
+              <td class="p-1 text-center">
+                <button @click="planLock(row.p)" :class="['px-2 py-1 rounded text-xs font-medium w-full', row.isLocked?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:bg-amber-200']">
+                  {{row.isLocked?'🔒 Locked':'⏳ Pending'}}
+                </button>
+              </td>
+              <td class="p-1 text-right"><button @click="planRemove(row.p)" class="text-red-500 px-2 hover:bg-red-50 rounded">×</button></td>
+            </tr>
+            <tr v-if="!planEnriched.length">
+              <td colspan="12" class="text-center py-6 text-slate-400 text-sm">ยังไม่มีแผนเดือนนี้ — กด <b>"+ เพิ่มแผน"</b> เพื่อใส่ order ที่ลูกค้าเสนอ %</td>
+            </tr>
           </tbody>
         </table>
       </div>
-    </details>
+    </div>
 
     <!-- VIEW MODE FILTER -->
     <div class="bg-white rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
@@ -27671,10 +29101,10 @@ app.component('view-pendingSales', {
       </div>
     </div>
 
-    <!-- Main Table -->
-    <div v-if="pendingSaleTable.length" class="bg-white rounded-xl shadow overflow-hidden">
+    <!-- Main Table — 🆕 V11: เพิ่ม "ราคาเสนอดีสุด" จาก Sales Plan + กำไรเทียบ Cost Pool -->
+    <div v-if="pendingSaleEnriched.length" class="bg-white rounded-xl shadow overflow-hidden">
       <div class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
-        <h3 class="font-bold text-amber-900 text-sm">🟡 ตารางรอขาย — ทองแดง / ทองเหลือง ({{pendingSaleTable.length}} รายการ)</h3>
+        <h3 class="font-bold text-amber-900 text-sm">🟡 ตารางรอขาย + ราคาเสนอดีสุด — ทองแดง / ทองเหลือง ({{pendingSaleEnriched.length}} รายการ)</h3>
         <button @click="exportPendingSaleCsv" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">📥 Export CSV</button>
       </div>
       <div class="overflow-x-auto">
@@ -27684,16 +29114,20 @@ app.component('view-pendingSales', {
               <th class="p-2 text-left">รหัส / สินค้า</th>
               <th class="p-2 text-left">หมวด</th>
               <th class="p-2 text-right text-emerald-700">รอขาย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
-              <th class="p-2 text-right text-emerald-700">มูลค่ารอขาย<br><span class="text-[10px] font-normal text-slate-400">(฿)</span></th>
-              <th class="p-2 text-right text-slate-600">ราคาเฉลี่ย<br><span class="text-[10px] font-normal text-slate-400">(฿/กก.)</span></th>
+              <th class="p-2 text-right text-slate-600">ต้นทุน Pool<br><span class="text-[10px] font-normal text-slate-400">(฿/กก.)</span></th>
+              <th class="p-2 text-right bg-amber-50">ราคาเสนอดีสุด<br><span class="text-[10px] font-normal text-slate-400">(จาก Sales Plan)</span></th>
+              <th class="p-2 text-right bg-amber-50">% LME</th>
+              <th class="p-2 text-left bg-amber-50">ลูกค้า</th>
+              <th class="p-2 text-right bg-emerald-50 text-emerald-700">กำไรคาดการณ์<br><span class="text-[10px] font-normal text-slate-400">(฿)</span></th>
+              <th class="p-2 text-right bg-emerald-50">Margin %</th>
               <th class="p-2 text-right text-red-700">รอขายจริง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
-              <th class="p-2 text-right text-pink-700">ล๊อกขายรอส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
+              <th class="p-2 text-right text-pink-700">ล๊อกขาย<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
               <th class="p-2 text-right text-purple-700">PO ซื้อรอส่ง<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
               <th class="p-2 text-right text-blue-700">STOCK<br><span class="text-[10px] font-normal text-slate-400">(กก.)</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in pendingSaleTable" :key="r.productId" class="border-t hover:bg-slate-50"
+            <tr v-for="r in pendingSaleEnriched" :key="r.productId" class="border-t hover:bg-slate-50"
                 :class="r.realPendingSale < 0 ? 'bg-red-50' : ''">
               <td class="p-2">
                 <span class="font-mono text-slate-500">{{r.productCode}}</span> {{r.productName}}
@@ -27701,8 +29135,19 @@ app.component('view-pendingSales', {
               </td>
               <td class="p-2 text-slate-600">{{r.metalGroup}}</td>
               <td class="p-2 text-right" :class="r.pendingSaleQty>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.pendingSaleQty)}}</td>
-              <td class="p-2 text-right" :class="r.pendingSaleValue>0?'font-bold text-emerald-700':'text-slate-300'">{{fmt(r.pendingSaleValue)}}</td>
-              <td class="p-2 text-right text-slate-600">{{r.avgPrice>0?fmt(r.avgPrice):'-'}}</td>
+              <td class="p-2 text-right text-slate-600">{{r.poolUnitCost>0?fmt(r.poolUnitCost):'-'}}</td>
+              <td class="p-2 text-right bg-amber-50 font-bold" :class="r.bestPrice>0?'text-amber-700':'text-slate-300'">
+                <span v-if="r.bestPrice>0">{{fmt(r.bestPrice)}} <span v-if="r.bestIsLocked" class="text-[10px] text-emerald-600">🔒</span></span>
+                <span v-else>-</span>
+              </td>
+              <td class="p-2 text-right bg-amber-50 text-xs">{{r.bestPct>0?r.bestPct.toFixed(1)+'%':'-'}}</td>
+              <td class="p-2 bg-amber-50 text-xs text-slate-600 truncate max-w-[140px]">{{r.bestCustomer||'-'}}</td>
+              <td class="p-2 text-right bg-emerald-50 font-bold" :class="r.bestPrice>0?(r.margin>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
+                {{r.bestPrice>0?fmt(r.margin):'-'}}
+              </td>
+              <td class="p-2 text-right bg-emerald-50 text-xs" :class="r.bestPrice>0?(r.marginPct>=0?'text-emerald-700':'text-red-600'):'text-slate-300'">
+                {{r.bestPrice>0?r.marginPct.toFixed(1)+'%':'-'}}
+              </td>
               <td class="p-2 text-right font-bold" :class="r.realPendingSale<0 ? 'text-red-700 bg-red-100' : (r.realPendingSale>0 ? 'text-emerald-700' : 'text-slate-400')">
                 <template v-if="r.realPendingSale<0">⚠ {{fmt(r.realPendingSale)}}</template>
                 <template v-else>{{fmt(r.realPendingSale)}}</template>
@@ -27714,10 +29159,11 @@ app.component('view-pendingSales', {
           </tbody>
           <tfoot class="bg-slate-50 border-t-2 border-slate-300">
             <tr class="font-bold text-slate-700">
-              <td class="p-2" colspan="2">รวม ({{pendingSaleTable.length}} รายการ)</td>
+              <td class="p-2" colspan="2">รวม ({{pendingSaleEnriched.length}} รายการ)</td>
               <td class="p-2 text-right text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleQty)}}</td>
-              <td class="p-2 text-right text-emerald-700">{{fmt(pendingSaleTotals.totalPendingSaleValue)}}</td>
-              <td class="p-2 text-right text-slate-400">-</td>
+              <td colspan="4"></td>
+              <td class="p-2 text-right text-emerald-700 bg-emerald-50">{{fmt(pendingSaleEnriched.reduce((s,r)=>s+(r.bestPrice>0?r.margin:0),0))}}</td>
+              <td class="bg-emerald-50"></td>
               <td class="p-2 text-right" :class="pendingSaleTotals.totalRealPending<0?'text-red-700':'text-slate-700'">{{fmt(pendingSaleTotals.totalRealPending)}}</td>
               <td class="p-2 text-right text-pink-700">{{fmt(pendingSaleTotals.totalLockedSell)}}</td>
               <td class="p-2 text-right text-purple-700">{{fmt(pendingSaleTotals.totalLockedBuy)}}</td>
@@ -27726,10 +29172,331 @@ app.component('view-pendingSales', {
           </tfoot>
         </table>
       </div>
+      <div class="px-4 py-2 bg-slate-50 text-[10px] text-slate-500 border-t italic">
+        💡 <b>กำไรคาดการณ์</b> = (ราคาเสนอดีสุด − ต้นทุน Cost Pool) × รอขาย · 🔒 = ราคา locked แล้วในแผน · ราคาเสนออ้างอิงจาก Sales Plan เดือน <b>{{planMonth}}</b>
+      </div>
     </div>
 
     <div v-if="!pendingSaleTable.length" class="bg-white rounded-xl shadow p-8 text-center text-slate-400">
       ยังไม่มีข้อมูล ทองแดง / ทองเหลือง — เมื่อมี PO Buy / บิลซื้อ / PO Sell ระบบจะคำนวณให้อัตโนมัติ
+    </div>
+  </div>`
+});
+
+/* =================================================================
+   🆕 V12 (2026-05-24): STOCK PLANNING CALENDAR
+   เทียบ Stock + PO Buy ที่จะเข้า vs PO Sell ที่ต้องส่ง
+   เน้น 4 หมวด: ทองแดง / ทองเหลือง / อลูมิเนียมกระป๋อง / อลูมิเนียมกระป๋องอัดก้อน
+   ================================================================= */
+app.component('view-stockPlanning', {
+  setup() {
+    const erp = window.$erp; const db = erp.db; const fmt = erp.fmt;
+    const FOCUS_GROUPS = ['ทองแดง','ทองเหลือง','อลูมิเนียมกระป๋อง','อลูมิเนียมกระป๋องอัดก้อน'];
+    const filterGroup = ref('');     // '' = all focus groups
+    const filterProduct = ref('');
+    const showProductsWithoutPO = ref(false);
+
+    /* Eligible products: 4 focus groups */
+    const focusProducts = computed(() => {
+      return (db.products||[]).filter(p => {
+        if (!p || p.active === false) return false;
+        const g = String(p.metalGroup||'');
+        const matches = FOCUS_GROUPS.some(fg => g.includes(fg)) ||
+          /copper|brass|aluminum|aluminium/i.test(g);
+        if (!matches) return false;
+        if (filterGroup.value && !g.includes(filterGroup.value)) return false;
+        if (filterProduct.value && p.id !== filterProduct.value) return false;
+        return true;
+      });
+    });
+
+    /* For each product, build event timeline + running balance */
+    const productTimelines = computed(() => {
+      const today = erp.today();
+      return focusProducts.value.map(prod => {
+        const stockNow = erp.stockOnHand ? erp.stockOnHand(prod.id) : 0;
+        const wac = erp.avgCost ? erp.avgCost(prod.id) : 0;
+
+        /* Events: PO Sell deliveries (− qty) + PO Buy arrivals (+ qty) */
+        const events = [];
+
+        // PO Sell — Open / Partially Matched, with delivery date
+        _trkSafe(db.poSells).forEach(po => {
+          if (!po || po.status === 'Cancelled' || po.status === 'Closed' || po.status === 'Completed') return;
+          const items = (po.items && po.items.length) ? po.items : [{productId: po.productId, qty: Number(po.qty||0), unitPrice: Number(po.unitPrice||0)}];
+          items.forEach(it => {
+            if (it.productId !== prod.id) return;
+            const itQty = Number(it.qty||0);
+            // คำนวณ delivered แล้ว — ใช้ poSellDeliveredQty (V10 helper) ปันส่วนตามสัดส่วน
+            const totalDelivered = erp.poSellDeliveredQty ? erp.poSellDeliveredQty(po.id) : 0;
+            const totalPoQty = Number(po.qty||0) || itQty;
+            const itDelivered = items.length === 1 ? totalDelivered : totalDelivered * (itQty / totalPoQty);
+            const remain = Math.max(0, itQty - itDelivered);
+            if (remain <= 0.01) return;
+            events.push({
+              date: po.deliveryDate || po.expectedDelivery || po.date || '9999-12-31',
+              type: 'sell',
+              docNo: po.docNo,
+              party: erp.customerName ? erp.customerName(po.customerId) : po.customerId,
+              qty: -remain,
+              poId: po.id,
+              channel: po.channel || '',
+              unitPrice: Number(it.unitPrice||po.unitPrice||0),
+              note: po.note || '',
+            });
+          });
+        });
+
+        // PO Buy — Open / Partially Received, with delivery date
+        _trkSafe(db.poBuys).forEach(po => {
+          if (!po || po.status === 'Cancelled' || po.status === 'cancelled' || po.status === 'Received') return;
+          if (po.requireDelivery === false) return;  // cost-only PO ไม่นับ
+          const items = (po.items && po.items.length) ? po.items : [{productId: po.productId, qty: Number(po.qty||0), remainingQty: Number(po.remainingQty||po.qty||0)}];
+          items.forEach(it => {
+            if (it.productId !== prod.id) return;
+            const remain = Number(it.remainingQty || it.qty || 0);
+            if (remain <= 0.01) return;
+            events.push({
+              date: po.deliveryDate || po.expectedDelivery || po.date || '9999-12-31',
+              type: 'buy',
+              docNo: po.docNo,
+              party: erp.supplierName ? erp.supplierName(po.supplierId) : po.supplierId,
+              qty: +remain,
+              poId: po.id,
+              unitPrice: Number(it.unitPrice||po.unitPrice||0),
+              note: po.note || '',
+            });
+          });
+        });
+
+        // Sort by date ASC
+        events.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+
+        /* Running balance simulation */
+        let balance = stockNow;
+        let firstShortageDate = null;
+        let maxShortageQty = 0;
+        const timeline = events.map(ev => {
+          const beforeBal = balance;
+          balance += ev.qty;
+          const isShort = ev.type === 'sell' && balance < 0;
+          if (isShort && !firstShortageDate) firstShortageDate = ev.date;
+          if (isShort && Math.abs(balance) > maxShortageQty) maxShortageQty = Math.abs(balance);
+          const daysFromToday = Math.round((new Date(ev.date) - new Date(today)) / 86400000);
+          return { ...ev, beforeBal, afterBal: balance, isShort, daysFromToday };
+        });
+
+        const totalSellPending = events.filter(e => e.type==='sell').reduce((s,e)=>s+Math.abs(e.qty),0);
+        const totalBuyComing = events.filter(e => e.type==='buy').reduce((s,e)=>s+e.qty,0);
+        const netAfterAll = stockNow + totalBuyComing - totalSellPending;
+        const finalBalance = timeline.length ? timeline[timeline.length-1].afterBal : stockNow;
+
+        // Earliest sell PO that becomes shortage
+        const nextSellEv = events.find(e => e.type==='sell');
+        const nextSellDate = nextSellEv ? nextSellEv.date : '';
+
+        let urgencyLevel = 'ok';
+        if (firstShortageDate) {
+          const daysUntil = Math.round((new Date(firstShortageDate) - new Date(today)) / 86400000);
+          if (daysUntil < 7) urgencyLevel = 'critical';
+          else if (daysUntil < 30) urgencyLevel = 'warning';
+          else urgencyLevel = 'planning';
+        } else if (netAfterAll < 0) {
+          urgencyLevel = 'warning';
+        }
+
+        return {
+          productId: prod.id, productCode: prod.code, productName: prod.name,
+          metalGroup: prod.metalGroup, itemStatus: prod.itemStatus || '-',
+          stockNow, wac, stockValue: stockNow * wac,
+          events, timeline,
+          totalSellPending, totalBuyComing, netAfterAll, finalBalance,
+          firstShortageDate, maxShortageQty,
+          nextSellDate, urgencyLevel,
+          eventCount: events.length,
+        };
+      }).filter(r => showProductsWithoutPO.value ? true : (r.eventCount > 0))
+      .sort((a,b) => {
+        // เรียงตามวันส่งใกล้สุด (sell PO) — ของที่ shortage ก่อน
+        const order = { critical: 0, warning: 1, planning: 2, ok: 3 };
+        if (order[a.urgencyLevel] !== order[b.urgencyLevel]) return order[a.urgencyLevel] - order[b.urgencyLevel];
+        if (a.nextSellDate && b.nextSellDate) return a.nextSellDate.localeCompare(b.nextSellDate);
+        if (a.nextSellDate) return -1;
+        if (b.nextSellDate) return 1;
+        return 0;
+      });
+    });
+
+    const planSummary = computed(() => {
+      const arr = productTimelines.value;
+      return {
+        count: arr.length,
+        critical: arr.filter(r => r.urgencyLevel==='critical').length,
+        warning: arr.filter(r => r.urgencyLevel==='warning').length,
+        planning: arr.filter(r => r.urgencyLevel==='planning').length,
+        ok: arr.filter(r => r.urgencyLevel==='ok').length,
+        totalShortageQty: arr.reduce((s,r)=>s+r.maxShortageQty,0),
+        totalStock: arr.reduce((s,r)=>s+r.stockNow,0),
+        totalBuyComing: arr.reduce((s,r)=>s+r.totalBuyComing,0),
+        totalSellPending: arr.reduce((s,r)=>s+r.totalSellPending,0),
+      };
+    });
+
+    const expandedProduct = ref('');
+    function toggleExpand(pid) {
+      expandedProduct.value = expandedProduct.value === pid ? '' : pid;
+    }
+
+    function exportCsv() {
+      const rows = [['Product','Group','Stock','PO Buy Coming','PO Sell Pending','Final Balance','First Shortage Date','Max Shortage Qty','Urgency','Next Sell Date']];
+      productTimelines.value.forEach(r => rows.push([r.productCode+' '+r.productName, r.metalGroup, r.stockNow, r.totalBuyComing, r.totalSellPending, r.finalBalance, r.firstShortageDate||'-', r.maxShortageQty, r.urgencyLevel, r.nextSellDate||'-']));
+      const csv = rows.map(r => r.map(c => {
+        const s = String(c==null?'':c).replace(/"/g,'""');
+        return /[,\n"]/.test(s) ? '"'+s+'"' : s;
+      }).join(',')).join('\n');
+      const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'stock_planning_'+erp.today()+'.csv';
+      a.click();
+    }
+
+    return { db, erp, fmt, FOCUS_GROUPS, filterGroup, filterProduct, showProductsWithoutPO,
+      focusProducts, productTimelines, planSummary, expandedProduct, toggleExpand, exportCsv };
+  },
+  template: `
+  <div class="space-y-3">
+    <div class="bg-gradient-to-r from-purple-600 to-indigo-700 text-white rounded-xl p-4 shadow">
+      <h1 class="text-xl font-bold">📅 วางแผนสต๊อก vs PO Sell — Stock Planning Calendar</h1>
+      <p class="text-sm opacity-80 mt-1">เทียบ Stock + PO Buy ที่จะเข้า vs PO Sell ที่ต้องส่ง · เน้น 🥉 ทองแดง · 🌟 ทองเหลือง · 🥫 อลูมิเนียมกระป๋อง · 🧱 อลูมิเนียมกระป๋องอัดก้อน · แจ้งเตือนเมื่อ Stock จะไม่พอ</p>
+    </div>
+
+    <!-- Summary KPIs -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div class="bg-red-50 rounded-xl shadow p-3 border-l-4 border-red-600">
+        <div class="text-xs text-red-700">🔴 CRITICAL (≤7 วัน)</div>
+        <div class="text-2xl font-bold text-red-700">{{planSummary.critical}}</div>
+        <div class="text-xs text-slate-500">สินค้า shortage ด่วน</div>
+      </div>
+      <div class="bg-amber-50 rounded-xl shadow p-3 border-l-4 border-amber-500">
+        <div class="text-xs text-amber-700">🟡 WARNING (≤30 วัน)</div>
+        <div class="text-2xl font-bold text-amber-700">{{planSummary.warning}}</div>
+        <div class="text-xs text-slate-500">ต้องวางแผนรับเพิ่ม</div>
+      </div>
+      <div class="bg-blue-50 rounded-xl shadow p-3 border-l-4 border-blue-500">
+        <div class="text-xs text-blue-700">🔵 PLANNING (>30 วัน)</div>
+        <div class="text-2xl font-bold text-blue-700">{{planSummary.planning}}</div>
+        <div class="text-xs text-slate-500">ติดตามต่อ</div>
+      </div>
+      <div class="bg-emerald-50 rounded-xl shadow p-3 border-l-4 border-emerald-500">
+        <div class="text-xs text-emerald-700">✅ OK</div>
+        <div class="text-2xl font-bold text-emerald-700">{{planSummary.ok}}</div>
+        <div class="text-xs text-slate-500">Stock พอ</div>
+      </div>
+      <div class="bg-white rounded-xl shadow p-3">
+        <div class="text-xs text-slate-500">รวม Shortage</div>
+        <div class="text-2xl font-bold" :class="planSummary.totalShortageQty>0?'text-red-700':'text-slate-700'">{{fmt(planSummary.totalShortageQty)}}</div>
+        <div class="text-xs text-slate-500">กก. ที่ขาด</div>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="bg-white rounded-xl shadow p-3 flex flex-wrap gap-2 items-center">
+      <select v-model="filterGroup" class="px-3 py-2 border rounded-lg text-sm">
+        <option value="">ทุกหมวด (4 focus)</option>
+        <option v-for="g in FOCUS_GROUPS" :key="g" :value="g">{{g}}</option>
+      </select>
+      <select v-model="filterProduct" class="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[200px]">
+        <option value="">ทุกสินค้า</option>
+        <option v-for="p in focusProducts" :key="p.id" :value="p.id">{{p.code}} - {{p.name}}</option>
+      </select>
+      <label class="text-sm flex items-center gap-1"><input type="checkbox" v-model="showProductsWithoutPO"> แสดงสินค้าที่ไม่มี PO</label>
+      <button @click="exportCsv" class="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm">📥 Export</button>
+    </div>
+
+    <!-- Product cards -->
+    <div v-if="!productTimelines.length" class="bg-white rounded-xl shadow p-8 text-center text-slate-400">
+      ไม่มีสินค้าใน 4 หมวด focus ที่มี PO Sell หรือ PO Buy active
+    </div>
+    <div v-for="r in productTimelines" :key="r.productId" class="bg-white rounded-xl shadow overflow-hidden border-l-4"
+      :class="r.urgencyLevel==='critical'?'border-red-600':r.urgencyLevel==='warning'?'border-amber-500':r.urgencyLevel==='planning'?'border-blue-500':'border-emerald-500'">
+      <!-- Product header -->
+      <div class="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-50" @click="toggleExpand(r.productId)">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-mono text-xs text-slate-500">{{r.productCode}}</span>
+            <span class="font-bold">{{r.productName}}</span>
+            <span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs">{{r.metalGroup}}</span>
+            <span v-if="r.urgencyLevel==='critical'" class="px-2 py-0.5 bg-red-600 text-white rounded text-xs font-bold animate-pulse">🚨 CRITICAL — Shortage {{r.firstShortageDate}}</span>
+            <span v-else-if="r.urgencyLevel==='warning'" class="px-2 py-0.5 bg-amber-500 text-white rounded text-xs font-bold">⚠ WARNING — Shortage {{r.firstShortageDate}}</span>
+            <span v-else-if="r.urgencyLevel==='planning'" class="px-2 py-0.5 bg-blue-500 text-white rounded text-xs font-bold">🔵 PLANNING — Shortage {{r.firstShortageDate}}</span>
+            <span v-else class="px-2 py-0.5 bg-emerald-500 text-white rounded text-xs font-bold">✅ OK</span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">
+            Stock: <b>{{fmt(r.stockNow)}}</b> กก. · WAC <b>{{fmt(r.wac)}}</b> ฿/กก.
+            · PO Buy เข้า: <b class="text-emerald-700">+{{fmt(r.totalBuyComing)}}</b> กก.
+            · PO Sell ส่ง: <b class="text-red-700">−{{fmt(r.totalSellPending)}}</b> กก.
+            · สมดุลสุดท้าย: <b :class="r.finalBalance<0?'text-red-700':'text-emerald-700'">{{fmt(r.finalBalance)}}</b> กก.
+            <span v-if="r.maxShortageQty>0" class="text-red-700 font-bold">· ⚠ Shortage สูงสุด {{fmt(r.maxShortageQty)}} กก.</span>
+          </div>
+        </div>
+        <div class="text-slate-400">{{expandedProduct===r.productId?'▼':'▶'}}</div>
+      </div>
+
+      <!-- Expanded timeline -->
+      <div v-if="expandedProduct===r.productId" class="border-t bg-slate-50">
+        <div v-if="!r.timeline.length" class="p-6 text-center text-slate-400 text-sm">ไม่มี PO Buy หรือ PO Sell คงค้าง</div>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="bg-slate-100">
+              <tr>
+                <th class="p-2 text-left">วันที่</th>
+                <th class="p-2 text-left">วันจากวันนี้</th>
+                <th class="p-2 text-center">ประเภท</th>
+                <th class="p-2 text-left">เลขที่ PO</th>
+                <th class="p-2 text-left">คู่ค้า</th>
+                <th class="p-2 text-right">จำนวน (กก.)</th>
+                <th class="p-2 text-right">ก่อน Event</th>
+                <th class="p-2 text-right">หลัง Event</th>
+                <th class="p-2 text-center">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(ev, i) in r.timeline" :key="i" class="border-t" :class="ev.isShort?'bg-red-50':ev.type==='buy'?'bg-emerald-50/30':''">
+                <td class="p-2 font-mono">{{ev.date}}</td>
+                <td class="p-2 text-xs">
+                  <span v-if="ev.daysFromToday<0" class="text-red-600">เลย {{Math.abs(ev.daysFromToday)}} วัน</span>
+                  <span v-else-if="ev.daysFromToday===0" class="text-amber-600 font-bold">วันนี้</span>
+                  <span v-else-if="ev.daysFromToday<=7" class="text-amber-700 font-bold">+{{ev.daysFromToday}} วัน</span>
+                  <span v-else>+{{ev.daysFromToday}} วัน</span>
+                </td>
+                <td class="p-2 text-center">
+                  <span v-if="ev.type==='buy'" class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold">📦 IN</span>
+                  <span v-else class="px-2 py-0.5 bg-red-100 text-red-700 rounded font-bold">📤 OUT</span>
+                </td>
+                <td class="p-2 font-mono">{{ev.docNo}}</td>
+                <td class="p-2 truncate max-w-[150px]">{{ev.party}}</td>
+                <td class="p-2 text-right font-bold" :class="ev.qty>0?'text-emerald-700':'text-red-700'">
+                  {{ev.qty>0?'+':''}}{{fmt(ev.qty)}}
+                </td>
+                <td class="p-2 text-right text-slate-500">{{fmt(ev.beforeBal)}}</td>
+                <td class="p-2 text-right font-bold" :class="ev.afterBal<0?'text-red-700':'text-slate-700'">
+                  {{fmt(ev.afterBal)}}
+                </td>
+                <td class="p-2 text-center">
+                  <span v-if="ev.isShort" class="px-2 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold">⚠ ขาด</span>
+                  <span v-else class="text-slate-400 text-[10px]">OK</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-xs text-slate-500 italic">
+      💡 <b>การคำนวณ:</b> เริ่มจาก Stock ปัจจุบัน → เรียง PO ตามวันส่ง → +PO Buy เข้า / −PO Sell ออก → ถ้า balance ติดลบหลังจาก PO Sell ใด → แจ้ง Shortage<br/>
+      🚨 <b>CRITICAL:</b> Shortage ภายใน 7 วัน · 🟡 <b>WARNING:</b> ≤30 วัน · 🔵 <b>PLANNING:</b> >30 วัน
     </div>
   </div>`
 });
