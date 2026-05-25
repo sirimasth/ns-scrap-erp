@@ -10804,20 +10804,15 @@ app.component('view-ar', {
       </div>
     </div>
     <div class="flex flex-wrap gap-2 mb-4 items-center">
-      <div class="flex border rounded-lg overflow-hidden">
-        <button @click="viewMode='byCustomer'" :class="['px-4 py-2 text-sm', viewMode==='byCustomer'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">👥 ตามลูกค้า + รายบิล</button>
-        <button @click="viewMode='flat'" :class="['px-4 py-2 text-sm border-l', viewMode==='flat'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">📄 รายบิล (Flat)</button>
-      </div>
       <select v-model="filterCustomer" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุก Customer</option><option v-for="c in db.customers" :value="c.id">{{c.name}}</option></select>
       <select v-model="filterChannel" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกช่องทาง</option><option v-for="c in db.salesChannels" :value="c.id">{{c.name}}</option></select>
       <select v-model="filterAging" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกอายุหนี้</option><option>Current</option><option>1-30</option><option>31-60</option><option>61-90</option><option>>90</option></select>
-      <button v-if="viewMode==='byCustomer'" @click="expandAll" class="bg-slate-100 px-3 py-2 rounded-lg text-xs">▼ ขยายทั้งหมด</button>
-      <button v-if="viewMode==='byCustomer'" @click="collapseAll" class="bg-slate-100 px-3 py-2 rounded-lg text-xs">▶ ย่อทั้งหมด</button>
-      <button @click="viewMode==='byCustomer'?exportCsvFull():exportCsv()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
+      <span class="text-xs text-slate-500">💡 คลิกแถวบิล → ขยายดูสินค้าในบิล</span>
+      <button @click="exportCsvFull()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
     </div>
 
-    <!-- 📷 V23: GROUP BY CUSTOMER — ลบ aging columns ออก -->
-    <div v-if="viewMode==='byCustomer'" class="bg-white rounded-xl shadow overflow-x-auto">
+    <!-- 📷 V24 ลบทิ้ง: GROUP BY CUSTOMER (เก็บโค้ดไว้แต่ซ่อนด้วย v-if=false) -->
+    <div v-if="false" class="bg-white rounded-xl shadow overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-blue-50">
           <tr>
@@ -10900,10 +10895,11 @@ app.component('view-ar', {
       </table>
     </div>
 
-    <!-- 📷 V23 FLAT view — เรียงตามชื่อลูกค้า + subtotal/ลูกค้า + ลบ aging column -->
-    <div v-else class="bg-white rounded-xl shadow overflow-x-auto">
+    <!-- 📷 V24 FLAT view (default) — เรียงตามชื่อลูกค้า + subtotal/ลูกค้า + คลิก row ดูสินค้าในบิล -->
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left w-8"></th>
           <th class="p-2 text-left">Customer</th>
           <th class="p-2 text-left">บิล</th>
           <th class="p-2 text-left">วันที่</th>
@@ -10915,26 +10911,63 @@ app.component('view-ar', {
         </tr></thead>
         <tbody>
           <template v-for="c in byCustomer" :key="c.customerId">
-            <tr v-for="b in c.bills" :key="b.id" class="border-t" :class="b.aging>30 ? 'bg-red-50/30' : (b.aging>0 ? 'bg-amber-50/20' : '')">
-              <td class="p-2">{{c.customerName}}</td>
-              <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
-              <td class="p-2">{{b.date}}</td>
-              <td class="p-2">{{b.dueDate}}</td>
-              <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
-              <td class="p-2 text-right text-emerald-600">{{fmt(b.receivedAmount)}}</td>
-              <td class="p-2 text-right font-bold text-amber-700">{{fmt(b.receivableBalance)}}</td>
-              <td class="p-2">{{erp.channelName(b.channelId, db.salesChannels)}}</td>
-            </tr>
+            <template v-for="b in c.bills" :key="b.id">
+              <tr class="border-t cursor-pointer hover:bg-blue-50/50" @click="expanded[b.id]=!expanded[b.id]"
+                :class="b.aging>30 ? 'bg-red-50/30' : (b.aging>0 ? 'bg-amber-50/20' : '')">
+                <td class="p-2 text-blue-600">{{expanded[b.id]?'▼':'▶'}}</td>
+                <td class="p-2">{{c.customerName}}</td>
+                <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
+                <td class="p-2">{{b.date}}</td>
+                <td class="p-2">{{b.dueDate}}</td>
+                <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
+                <td class="p-2 text-right text-emerald-600">{{fmt(b.receivedAmount)}}</td>
+                <td class="p-2 text-right font-bold text-amber-700">{{fmt(b.receivableBalance)}}</td>
+                <td class="p-2">{{erp.channelName(b.channelId, db.salesChannels)}}</td>
+              </tr>
+              <tr v-if="expanded[b.id]" class="bg-slate-50">
+                <td></td>
+                <td colspan="8" class="p-2">
+                  <div class="bg-white border rounded-lg p-2">
+                    <div class="text-xs text-slate-500 mb-1">รายการสินค้าในบิล <b class="text-blue-600">{{b.docNo}}</b></div>
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="p-1.5 text-left">สินค้า</th>
+                          <th class="p-1.5 text-left">Lot</th>
+                          <th class="p-1.5 text-right">น้ำหนัก (กก.)</th>
+                          <th class="p-1.5 text-right">ราคา/กก.</th>
+                          <th class="p-1.5 text-right">รวม</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(it, i) in billItemsSummary(b.id)" :key="i" class="border-t">
+                          <td class="p-1.5">{{it.productName}}</td>
+                          <td class="p-1.5 font-mono text-slate-500">{{it.lotNo}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.weight)}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.unitPrice)}}</td>
+                          <td class="p-1.5 text-right font-semibold">{{fmt(it.netAmount)}}</td>
+                        </tr>
+                        <tr v-if="billItemsSummary(b.id).length===0">
+                          <td colspan="5" class="p-1.5 text-center text-slate-400">ไม่มีรายการสินค้า</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            </template>
             <tr class="border-t-2 border-blue-200 bg-blue-50 font-bold">
+              <td></td>
               <td class="p-2 text-right text-blue-700" colspan="6">▶ รวมค้างรับ {{c.customerName}} ({{c.bills.length}} บิล)</td>
               <td class="p-2 text-right text-blue-700 text-base">{{fmt(c.total)}}</td>
               <td></td>
             </tr>
           </template>
-          <tr v-if="!byCustomer.length"><td colspan="8" class="text-center py-8 text-slate-400">✅ ไม่มีลูกหนี้คงค้าง</td></tr>
+          <tr v-if="!byCustomer.length"><td colspan="9" class="text-center py-8 text-slate-400">✅ ไม่มีลูกหนี้คงค้าง</td></tr>
         </tbody>
         <tfoot v-if="byCustomer.length" class="bg-blue-100 font-bold">
           <tr>
+            <td></td>
             <td class="p-2 text-right" colspan="6">รวมทั้งหมด ({{byCustomer.length}} ลูกค้า · {{list.length}} บิล)</td>
             <td class="p-2 text-right text-blue-700 text-lg">{{fmt(totalAR)}}</td>
             <td></td>
@@ -11161,18 +11194,15 @@ app.component('view-ap', {
     </div>
 
     <div class="flex flex-wrap gap-2 mb-3 items-center">
-      <div class="flex border rounded-lg overflow-hidden">
-        <button @click="viewMode='summary'" :class="['px-4 py-2 text-sm', viewMode==='summary'?'bg-red-600 text-white':'bg-white text-slate-600']">📊 สรุปตาม Supplier</button>
-        <button @click="viewMode='detail'" :class="['px-4 py-2 text-sm border-l', viewMode==='detail'?'bg-red-600 text-white':'bg-white text-slate-600']">📄 รายบิล</button>
-      </div>
       <select v-model="filterSupplier" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุก Supplier</option><option v-for="s in db.suppliers" :value="s.id">{{s.name}}</option></select>
       <select v-model="filterChannel" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกช่องทาง</option><option v-for="c in db.purchaseChannels" :value="c.id">{{c.name}}</option></select>
       <select v-model="filterAging" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกอายุหนี้</option><option>Current</option><option>1-30</option><option>31-60</option><option>61-90</option><option>>90</option></select>
-      <button @click="viewMode==='summary'?exportSummary():exportCsv()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
+      <span class="text-xs text-slate-500">💡 คลิกแถวบิล → ขยายดูสินค้าในบิล</span>
+      <button @click="exportCsv()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
     </div>
 
-    <!-- 📷 V23 Summary view: ลบ aging columns -->
-    <div v-if="viewMode==='summary'" class="bg-white rounded-xl shadow overflow-x-auto">
+    <!-- 📷 V24 ลบทิ้ง: Summary view (เก็บโค้ดไว้ซ่อนด้วย v-if=false) -->
+    <div v-if="false" class="bg-white rounded-xl shadow overflow-x-auto">
       <div class="flex gap-2 px-3 py-2 border-b">
         <button @click="expandAllSupp" class="bg-slate-100 px-3 py-1.5 rounded text-xs">▼ ขยายทุก Supplier</button>
         <button @click="collapseAllSupp" class="bg-slate-100 px-3 py-1.5 rounded text-xs">▶ ย่อทั้งหมด</button>
@@ -11258,10 +11288,11 @@ app.component('view-ap', {
       </table>
     </div>
 
-    <!-- 📷 V23 Detail view (flat): เรียงตามชื่อ Supplier + subtotal/Supplier -->
-    <div v-else class="bg-white rounded-xl shadow overflow-x-auto">
+    <!-- 📷 V24 Detail view (default): flat + คลิก row ดูสินค้าในบิล -->
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left w-8"></th>
           <th class="p-2 text-left">Supplier</th>
           <th class="p-2 text-left">บิล</th>
           <th class="p-2 text-left">วันที่</th>
@@ -11273,26 +11304,63 @@ app.component('view-ap', {
         </tr></thead>
         <tbody>
           <template v-for="s in bySupplier" :key="s.supplierId">
-            <tr v-for="b in s.billsList" :key="b.id" class="border-t" :class="b.aging>30?'bg-red-50/30':b.aging>0?'bg-amber-50/20':''">
-              <td class="p-2">{{s.supplierName}}</td>
-              <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
-              <td class="p-2">{{b.date}}</td>
-              <td class="p-2">{{b.dueDate}}</td>
-              <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
-              <td class="p-2 text-right text-emerald-600">{{fmt(b.paidAmount)}}</td>
-              <td class="p-2 text-right font-bold text-red-600">{{fmt(b.payableBalance)}}</td>
-              <td class="p-2">{{erp.channelName(b.channelId, db.purchaseChannels)}}</td>
-            </tr>
+            <template v-for="b in s.billsList" :key="b.id">
+              <tr class="border-t cursor-pointer hover:bg-red-50/50" @click="expandedSupp[b.id]=!expandedSupp[b.id]"
+                :class="b.aging>30?'bg-red-50/30':b.aging>0?'bg-amber-50/20':''">
+                <td class="p-2 text-red-600">{{expandedSupp[b.id]?'▼':'▶'}}</td>
+                <td class="p-2">{{s.supplierName}}</td>
+                <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
+                <td class="p-2">{{b.date}}</td>
+                <td class="p-2">{{b.dueDate}}</td>
+                <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
+                <td class="p-2 text-right text-emerald-600">{{fmt(b.paidAmount)}}</td>
+                <td class="p-2 text-right font-bold text-red-600">{{fmt(b.payableBalance)}}</td>
+                <td class="p-2">{{erp.channelName(b.channelId, db.purchaseChannels)}}</td>
+              </tr>
+              <tr v-if="expandedSupp[b.id]" class="bg-slate-50">
+                <td></td>
+                <td colspan="8" class="p-2">
+                  <div class="bg-white border rounded-lg p-2">
+                    <div class="text-xs text-slate-500 mb-1">รายการสินค้าในบิล <b class="text-red-600">{{b.docNo}}</b></div>
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-100">
+                        <tr>
+                          <th class="p-1.5 text-left">สินค้า</th>
+                          <th class="p-1.5 text-left">Lot</th>
+                          <th class="p-1.5 text-right">น้ำหนัก (กก.)</th>
+                          <th class="p-1.5 text-right">ราคา/กก.</th>
+                          <th class="p-1.5 text-right">รวม</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(it, i) in pbItems(b.id)" :key="i" class="border-t">
+                          <td class="p-1.5">{{it.productName}}</td>
+                          <td class="p-1.5 font-mono text-slate-500">{{it.lotNo}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.weight)}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.unitPrice)}}</td>
+                          <td class="p-1.5 text-right font-semibold">{{fmt(it.netAmount)}}</td>
+                        </tr>
+                        <tr v-if="pbItems(b.id).length===0">
+                          <td colspan="5" class="p-1.5 text-center text-slate-400">ไม่มีรายการสินค้า</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            </template>
             <tr class="border-t-2 border-red-200 bg-red-50 font-bold">
+              <td></td>
               <td class="p-2 text-right text-red-700" colspan="6">▶ รวมค้างจ่าย {{s.supplierName}} ({{s.bills}} บิล)</td>
               <td class="p-2 text-right text-red-700 text-base">{{fmt(s.total)}}</td>
               <td></td>
             </tr>
           </template>
-          <tr v-if="!bySupplier.length"><td colspan="8" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
+          <tr v-if="!bySupplier.length"><td colspan="9" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
         </tbody>
         <tfoot v-if="bySupplier.length" class="bg-red-100 font-bold">
           <tr>
+            <td></td>
             <td class="p-2 text-right" colspan="6">รวมทั้งหมด ({{bySupplier.length}} Supplier · {{list.length}} บิล)</td>
             <td class="p-2 text-right text-red-700 text-lg">{{fmt(totalAP)}}</td>
             <td></td>
