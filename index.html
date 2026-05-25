@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="./track-asset-overview.js"></script>
 <script>
   /* ============================================================
@@ -315,12 +316,22 @@
         </div>
       </div>
       <!-- 🆕 component wrap ด้วย div ที่ class เปลี่ยนตาม read-only state -->
-      <div v-if="canViewCurrent" :class="!isWriterCurrent ? 'read-only-view' : ''">
+      <div v-if="canViewCurrent" :class="!isWriterCurrent ? 'read-only-view' : ''" id="ns-view-capture-root">
         <component :is="'view-' + currentView"></component>
       </div>
     </main>
   </div>
 </div>
+
+<!-- 📷 V22: FLOATING SHARE-AS-IMAGE BUTTON — shown only on whitelisted views -->
+<button v-if="shareableViews.includes(currentView)"
+  @click="$erp.shareAsImage('#ns-view-capture-root', shareFilename(currentView))"
+  title="📷 บันทึก/แชร์เป็นรูปภาพ"
+  class="fixed z-40 bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold py-3 px-4 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105"
+  style="bottom:90px;right:20px;">
+  <span class="text-xl">📷</span>
+  <span class="hidden sm:inline text-sm">Share รูปภาพ → LINE</span>
+</button>
 
 <!-- TOAST -->
 <div v-if="toast.show" :class="['fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-lg text-white z-50 transition', toast.type === 'error' ? 'bg-red-600' : toast.type === 'warn' ? 'bg-amber-600' : 'bg-emerald-600']">
@@ -2846,12 +2857,12 @@ function seedData() {
       { id:'R-POOPAE', name:'Poopae', desc:'Role พิเศษ — เข้าถึงพิเศษ + Production + Asset + Loan + ใบสำคัญรับเงิน + Bank Recon + Import Master + โอนเงินระหว่างบัญชี', isSystem:false,
         // 🆕 ADD: receiptVoucher, bankRecon, mdExpense, historicalData, mdImport, transfer
         // 🚫 REMOVE: dashboard, cashPosition
-        menus:['changePassword','weighing','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','wipReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','trackAssetOverview','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile'],
+        menus:['changePassword','weighing','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','trackAssetOverview','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:true, seeCash:true, seeFinancials:true, seeOpening:true,
         branchScope:'all' },
       { id:'R-WAREHOUSE', name:'คลัง', desc:'คลังสินค้า — Stock, Production, Transfer (เฉพาะสาขาตัวเอง)', isSystem:false,
-        menus:['changePassword','weighing','stockBalance','stockLedger','stockTransfer','pendingSales','stockPlanning','production','productionDashboard','productionReport','wipReport','machineUtil','mdProduct','mdBranch','gradeAdjustment','stockAdjust','statusConvert','customerReturn','backup','companyProfile'],
+        menus:['changePassword','weighing','stockBalance','stockLedger','stockTransfer','pendingSales','stockPlanning','production','productionDashboard','productionReport','machineUtil','mdProduct','mdBranch','gradeAdjustment','stockAdjust','statusConvert','customerReturn','backup','companyProfile'],
         actions:{'stockTransfer':['view','create','edit','post','export'],'production':['view','create','edit','post','export'],'gradeAdjustment':['view','create','edit','export'],'stockAdjust':['view','create','edit','export'],'*':['view','export']},
         seeCost:false, seeProfit:false, seeCash:false, seeFinancials:false, seeOpening:false,
         branchScope:'own' },
@@ -7065,6 +7076,80 @@ window.$erp = {
       if (_GLOBAL_DB.userActivityLog.length > 5000) _GLOBAL_DB.userActivityLog.length = 5000;
     } catch (e) { console.error('logActivity:', e); }
   },
+
+  /* ================================================================
+     📷 SHARE-AS-IMAGE — V22
+     สร้างรูปภาพจาก DOM ส่งเข้า LINE/Messenger ได้ — html2canvas + Web Share API
+     ใช้: window.$erp.shareAsImage('#elementId', 'AR-Report-2026-05-25')
+     ================================================================ */
+  shareAsImage: async function (selector, filename, options = {}) {
+    try {
+      if (!window.html2canvas) { window.$erp.showToast('กำลังโหลด html2canvas — ลองอีกครั้ง', 'error'); return; }
+      const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+      if (!el) { window.$erp.showToast('ไม่พบ element สำหรับ capture', 'error'); return; }
+      window.$erp.showToast('⏳ กำลังสร้างรูปภาพ...', 'success');
+      // ขยาย element ที่ scroll ได้ ให้ capture ได้ครบ
+      const _origOverflow = el.style.overflow;
+      el.style.overflow = 'visible';
+      const canvas = await window.html2canvas(el, {
+        scale: options.scale || 2,
+        useCORS: true,
+        backgroundColor: options.bg || '#ffffff',
+        logging: false,
+        windowWidth: el.scrollWidth,
+        windowHeight: el.scrollHeight,
+      });
+      el.style.overflow = _origOverflow;
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.95));
+      const fName = (filename || 'NS-Report-' + window.$erp.today()) + '.png';
+      // Modal preview + actions
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;overflow:auto;';
+      const url = URL.createObjectURL(blob);
+      overlay.innerHTML =
+        '<div style="background:#fff;border-radius:14px;padding:14px;max-width:96vw;max-height:90vh;overflow:auto;text-align:center;">' +
+        '  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">' +
+        '    <div style="font-weight:700;color:#0f172a;">📷 พรีวิวรูปภาพ — ' + fName + '</div>' +
+        '    <div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '      <button id="_shareImgDownload" style="background:#16a34a;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;">💾 Download</button>' +
+        '      <button id="_shareImgCopy" style="background:#0ea5e9;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;">📋 Copy</button>' +
+        '      <button id="_shareImgShare" style="background:#22c55e;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;">📲 Share LINE</button>' +
+        '      <button id="_shareImgClose" style="background:#64748b;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;">✕ ปิด</button>' +
+        '    </div>' +
+        '  </div>' +
+        '  <img src="' + url + '" alt="preview" style="max-width:100%;height:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
+        '  <div style="margin-top:8px;color:#64748b;font-size:12px;">กด "📲 Share LINE" บนมือถือ → เลือก LINE → ส่งเข้ากลุ่ม | บน Desktop ใช้ Copy แล้ว paste ใน LINE</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      const cleanup = () => { URL.revokeObjectURL(url); overlay.remove(); };
+      overlay.querySelector('#_shareImgClose').onclick = cleanup;
+      overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+      overlay.querySelector('#_shareImgDownload').onclick = () => {
+        const a = document.createElement('a'); a.href = url; a.download = fName; a.click();
+        window.$erp.showToast('💾 บันทึกรูปแล้ว', 'success');
+      };
+      overlay.querySelector('#_shareImgCopy').onclick = async () => {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          window.$erp.showToast('📋 Copy รูปแล้ว — paste ใน LINE ได้เลย', 'success');
+        } catch (e) { window.$erp.showToast('Copy fail — กด Download แทน: '+e.message, 'error'); }
+      };
+      overlay.querySelector('#_shareImgShare').onclick = async () => {
+        try {
+          const file = new File([blob], fName, { type: 'image/png' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: fName, text: filename || 'NS Scrap Report' });
+            window.$erp.showToast('📲 ส่งแล้ว', 'success');
+          } else {
+            window.$erp.showToast('อุปกรณ์นี้ไม่รองรับ Share — ใช้ Download/Copy แทน', 'error');
+          }
+        } catch (e) { window.$erp.showToast('Share fail: '+e.message, 'error'); }
+      };
+    } catch (e) {
+      console.error('shareAsImage:', e);
+      window.$erp.showToast('Share fail: '+e.message, 'error');
+    }
+  },
 };
 
 /* ================================================================
@@ -8951,8 +9036,7 @@ const app = createApp({
       { label:'การผลิต', items:[
         {view:'production', label:'ใบสั่งผลิต', icon:'🏭'},
         {view:'productionDashboard', label:'📊 Production Dashboard', icon:'📊'},
-        {view:'wipReport', label:'WIP คงเหลือ', icon:'⏳'},
-        {view:'productionReport', label:'รายงานการผลิต / Yield', icon:'📐'},
+        {view:'productionReport', label:'รายงานการผลิต / Yield (รวม WIP)', icon:'📐'},
         {view:'yieldLossReport', label:'Yield/Loss + Abnormal', icon:'📉'},
         /* 🆕 V15 (2026-05-24): ลบ productionCostReport + machineUtil ออกจากเมนู — component ยังอยู่เผื่อ deep link */
       ]},
@@ -9476,13 +9560,34 @@ const app = createApp({
       console.log('[skipCloudCheck] flags cleared — continue offline mode');
     };
 
+    /* 📷 V22: SHARE-AS-IMAGE — whitelisted views ที่จะแสดงปุ่ม + filename builder */
+    const shareableViews = [
+      'ar','ap','poBuy','poSell','poOutstanding','stockBalance','pendingSales','stockPlanning',
+      'paymentApproval','cashOthersSummary','trackAssetOverview','dailyReport','dashboard',
+      'productionReport','ownerDaily'
+    ];
+    function shareFilename(view) {
+      const map = {
+        ar:'AR-ลูกหนี้', ap:'AP-เจ้าหนี้', poBuy:'PO-ซื้อ', poSell:'PO-ขาย',
+        poOutstanding:'PO-คงเหลือ', stockBalance:'สต๊อกคงเหลือ',
+        pendingSales:'รายการรอขาย-LME', stockPlanning:'วางแผนสต๊อก',
+        paymentApproval:'ใบอนุมัติจ่าย-Cashier', cashOthersSummary:'NetWorth-TrackAsset',
+        trackAssetOverview:'NetWorth-TrackAsset', dailyReport:'AnalyticsDashboard',
+        dashboard:'Dashboard', productionReport:'รายงานผลิต-Yield',
+        ownerDaily:'OwnerDailyControl'
+      };
+      return 'NS-' + (map[view] || view) + '-' + window.$erp.today();
+    }
+    window.$erp.shareableViews = shareableViews;
+
     return { db, currentUser, currentView, currentBranchId, sidebarOpen, loginForm, loginError, canViewCurrent, isWriterCurrent,
       menuGroups: visibleMenuGroups, currentTitle, toast, login, logout, resetDemo,
       syncStatus, dataEmptyBanner, forcePulling, forcePull, manualSyncNow,
       showSyncErrors, getErrorList, clearSyncErrors,
       hasUniqueConflict, autoFixDuplicateDocNo,   // 🆕
       syncHealthText, syncHealthLevel,
-      $saveStatus, skipCloudCheck };
+      $saveStatus, skipCloudCheck,
+      $erp: window.$erp, shareableViews, shareFilename };  // 📷 V22
   }
 });
 
@@ -10483,6 +10588,8 @@ app.component('view-ar', {
   setup() {
     const erp = window.$erp; const db = erp.db;
     const filterCustomer = ref(''); const filterChannel = ref(''); const filterAging = ref('');
+    const viewMode = ref('byCustomer');  // 📷 V22: 'byCustomer' | 'flat'
+    const expanded = reactive({});       // 📷 V22: customerId -> bool
     const today = new Date(erp.today());
     function ageDays(date) { return Math.floor((today - new Date(date)) / 86400000); }
     function ageBucket(d) { return d<=0?'Current': d<=30?'1-30': d<=60?'31-60': d<=90?'61-90':'>90'; }
@@ -10561,7 +10668,65 @@ app.component('view-ar', {
       list.value.forEach(r => rows.push([erp.customerName(r.customerId), r.docNo, r.date, r.dueDate, r.aging, r.totalAmount, r.receivedAmount, r.receivableBalance, erp.channelName(r.channelId, db.salesChannels)]));
       downloadCsv('AR_'+erp.today()+'.csv', rows);
     }
-    return { db, erp, filterCustomer, filterChannel, filterAging, list, totalAR, overdueAR, buckets, pendingIssue, topAR, goTo, exportCsv, fmt:erp.fmt };
+    /* 📷 V22: GROUP BY CUSTOMER with bills + items */
+    const byCustomer = computed(() => {
+      const map = new Map();
+      list.value.forEach(b => {
+        const k = b.customerId || 'unknown';
+        if (!map.has(k)) map.set(k, {
+          customerId: k, customerName: erp.customerName(k),
+          bills: [], total: 0, overdue: 0, oldest: 0,
+          current:0, b30:0, b60:0, b90:0, bGT90:0,
+        });
+        const x = map.get(k);
+        x.bills.push(b);
+        x.total += Number(b.receivableBalance||0);
+        if (b.aging > 0) x.overdue += Number(b.receivableBalance||0);
+        if (b.aging > x.oldest) x.oldest = b.aging;
+        if (b.bucket==='Current') x.current += Number(b.receivableBalance||0);
+        else if (b.bucket==='1-30') x.b30 += Number(b.receivableBalance||0);
+        else if (b.bucket==='31-60') x.b60 += Number(b.receivableBalance||0);
+        else if (b.bucket==='61-90') x.b90 += Number(b.receivableBalance||0);
+        else x.bGT90 += Number(b.receivableBalance||0);
+      });
+      // sort bills by aging desc
+      Array.from(map.values()).forEach(c => c.bills.sort((a,b) => b.aging - a.aging));
+      return Array.from(map.values()).sort((a,b) => b.total - a.total);
+    });
+    function toggleCust(cid) { expanded[cid] = !expanded[cid]; }
+    function expandAll() { byCustomer.value.forEach(c => expanded[c.customerId] = true); }
+    function collapseAll() { Object.keys(expanded).forEach(k => expanded[k] = false); }
+    function billItemsSummary(billId) {
+      const b = db.salesBills.find(x => x && x.id === billId);
+      if (!b || !b.items) return [];
+      return (b.items||[]).map(it => ({
+        productName: erp.productName(it.productId),
+        weight: Number(it.weight||it.netWeight||0),
+        unitPrice: Number(it.unitPrice||it.price||0),
+        netAmount: Number(it.netAmount||it.totalAmount|| (Number(it.weight||0) * Number(it.unitPrice||0))),
+        lotNo: it.lotNo || '-',
+      }));
+    }
+    function exportCsvFull() {
+      const rows = [['Customer','Bill','Date','Due','Aging','Product','Lot','Weight','UnitPrice','NetAmount','BillTotal','Received','Outstanding']];
+      byCustomer.value.forEach(c => c.bills.forEach(b => {
+        const items = billItemsSummary(b.id);
+        if (items.length === 0) {
+          rows.push([c.customerName, b.docNo, b.date, b.dueDate, b.aging, '-','-','-','-','-', b.totalAmount, b.receivedAmount, b.receivableBalance]);
+        } else {
+          items.forEach((it, i) => rows.push([
+            i===0?c.customerName:'', i===0?b.docNo:'', i===0?b.date:'', i===0?b.dueDate:'', i===0?b.aging:'',
+            it.productName, it.lotNo, it.weight, it.unitPrice, it.netAmount,
+            i===0?b.totalAmount:'', i===0?b.receivedAmount:'', i===0?b.receivableBalance:''
+          ]));
+        }
+      }));
+      downloadCsv('AR_byCustomer_'+erp.today()+'.csv', rows);
+    }
+    return { db, erp, filterCustomer, filterChannel, filterAging, viewMode, expanded,
+      list, totalAR, overdueAR, buckets, pendingIssue, topAR, byCustomer,
+      goTo, exportCsv, exportCsvFull, toggleCust, expandAll, collapseAll, billItemsSummary,
+      fmt:erp.fmt };
   },
   template: `
   <div>
@@ -10638,28 +10803,143 @@ app.component('view-ar', {
         </div>
       </div>
     </div>
-    <div class="flex flex-wrap gap-2 mb-4">
+    <div class="flex flex-wrap gap-2 mb-4 items-center">
+      <div class="flex border rounded-lg overflow-hidden">
+        <button @click="viewMode='byCustomer'" :class="['px-4 py-2 text-sm', viewMode==='byCustomer'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">👥 ตามลูกค้า + รายบิล</button>
+        <button @click="viewMode='flat'" :class="['px-4 py-2 text-sm border-l', viewMode==='flat'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">📄 รายบิล (Flat)</button>
+      </div>
       <select v-model="filterCustomer" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุก Customer</option><option v-for="c in db.customers" :value="c.id">{{c.name}}</option></select>
       <select v-model="filterChannel" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกช่องทาง</option><option v-for="c in db.salesChannels" :value="c.id">{{c.name}}</option></select>
       <select v-model="filterAging" class="px-3 py-2 border rounded-lg text-sm"><option value="">ทุกอายุหนี้</option><option>Current</option><option>1-30</option><option>31-60</option><option>61-90</option><option>>90</option></select>
-      <button @click="exportCsv" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">Export CSV</button>
+      <button v-if="viewMode==='byCustomer'" @click="expandAll" class="bg-slate-100 px-3 py-2 rounded-lg text-xs">▼ ขยายทั้งหมด</button>
+      <button v-if="viewMode==='byCustomer'" @click="collapseAll" class="bg-slate-100 px-3 py-2 rounded-lg text-xs">▶ ย่อทั้งหมด</button>
+      <button @click="viewMode==='byCustomer'?exportCsvFull():exportCsv()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
     </div>
-    <div class="bg-white rounded-xl shadow overflow-x-auto">
-      <table class="w-full text-sm table-zebra">
-        <thead class="bg-slate-100"><tr><th class="p-2 text-left">Customer</th><th class="p-2 text-left">บิล</th><th class="p-2 text-left">วันที่</th><th class="p-2 text-left">Due</th><th class="p-2 text-right">อายุ(วัน)</th><th class="p-2 text-right">ยอด</th><th class="p-2 text-right">รับแล้ว</th><th class="p-2 text-right">ค้างรับ</th><th class="p-2 text-left">Channel</th></tr></thead>
-        <tbody>
-          <tr v-for="r in list" :key="r.id" class="border-t" :class="r.aging>30 ? 'bg-red-50/50' : (r.aging>0 ? 'bg-amber-50/30' : '')">
-            <td class="p-2">{{erp.customerName(r.customerId)}}</td>
-            <td class="p-2 font-mono text-blue-600">{{r.docNo}}</td>
-            <td class="p-2">{{r.date}}</td><td class="p-2">{{r.dueDate}}</td>
-            <td class="p-2 text-right" :class="r.aging>30?'text-red-600 font-bold':r.aging>0?'text-amber-600':''">{{r.aging}}</td>
-            <td class="p-2 text-right">{{fmt(r.totalAmount)}}</td>
-            <td class="p-2 text-right text-emerald-600">{{fmt(r.receivedAmount)}}</td>
-            <td class="p-2 text-right font-bold text-amber-700">{{fmt(r.receivableBalance)}}</td>
-            <td class="p-2">{{erp.channelName(r.channelId, db.salesChannels)}}</td>
+
+    <!-- 📷 V23: GROUP BY CUSTOMER — ลบ aging columns ออก -->
+    <div v-if="viewMode==='byCustomer'" class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-blue-50">
+          <tr>
+            <th class="p-2 text-left w-8"></th>
+            <th class="p-2 text-left">ลูกค้า</th>
+            <th class="p-2 text-right">#บิล</th>
+            <th class="p-2 text-right">รวมค้างรับ</th>
+            <th class="p-2 text-right">เกินสุด</th>
           </tr>
-          <tr v-if="list.length===0"><td colspan="9" class="text-center py-8 text-slate-400">ไม่มีลูกหนี้คงค้าง</td></tr>
+        </thead>
+        <tbody>
+          <template v-for="c in byCustomer" :key="c.customerId">
+            <tr class="border-t cursor-pointer hover:bg-blue-50/50 font-semibold" @click="toggleCust(c.customerId)"
+              :class="c.oldest>30?'bg-red-50/40':c.oldest>0?'bg-amber-50/30':'bg-white'">
+              <td class="p-2 text-blue-600">{{expanded[c.customerId]?'▼':'▶'}}</td>
+              <td class="p-2">{{c.customerName}} <span class="text-xs text-slate-400 font-normal">({{c.bills.length}} บิล)</span></td>
+              <td class="p-2 text-right">{{c.bills.length}}</td>
+              <td class="p-2 text-right font-bold text-blue-700 text-base">{{fmt(c.total)}}</td>
+              <td class="p-2 text-right" :class="c.oldest>30?'text-red-700 font-bold':c.oldest>0?'text-amber-700':'text-slate-500'">{{c.oldest>0?c.oldest+' วัน':'-'}}</td>
+            </tr>
+            <!-- BILL DETAILS -->
+            <tr v-if="expanded[c.customerId]" class="bg-slate-50/40">
+              <td></td>
+              <td colspan="4" class="p-2">
+                <div class="space-y-2">
+                  <div v-for="b in c.bills" :key="b.id" class="bg-white border rounded-lg p-3 shadow-sm"
+                    :class="b.aging>30?'border-red-300':b.aging>0?'border-amber-300':'border-slate-200'">
+                    <div class="flex flex-wrap items-center gap-3 mb-2 pb-2 border-b">
+                      <span class="font-mono font-bold text-blue-600">📄 {{b.docNo}}</span>
+                      <span class="text-xs text-slate-500">วันที่ {{b.date}}</span>
+                      <span class="text-xs text-slate-500">Due {{b.dueDate}}</span>
+                      <span class="text-xs px-2 py-0.5 rounded font-bold"
+                        :class="b.aging>30?'bg-red-100 text-red-700':b.aging>0?'bg-amber-100 text-amber-700':'bg-slate-100 text-slate-600'">
+                        {{b.bucket}} ({{b.aging>0?'เกิน '+b.aging+' วัน':b.aging===0?'ครบกำหนดวันนี้':'ยังไม่ครบ'}})
+                      </span>
+                      <span class="text-xs text-slate-500">Channel: {{erp.channelName(b.channelId, db.salesChannels)}}</span>
+                      <span class="ml-auto text-xs">ยอดบิล: <b class="text-slate-700">{{fmt(b.totalAmount)}}</b></span>
+                      <span class="text-xs text-emerald-600">รับแล้ว: <b>{{fmt(b.receivedAmount)}}</b></span>
+                      <span class="text-xs">ค้างรับ: <b class="text-red-600 text-base">{{fmt(b.receivableBalance)}}</b></span>
+                    </div>
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-50">
+                        <tr>
+                          <th class="p-1.5 text-left">สินค้า</th>
+                          <th class="p-1.5 text-left">Lot</th>
+                          <th class="p-1.5 text-right">น้ำหนัก (กก.)</th>
+                          <th class="p-1.5 text-right">ราคา/กก.</th>
+                          <th class="p-1.5 text-right">รวม</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(it, i) in billItemsSummary(b.id)" :key="i" class="border-t">
+                          <td class="p-1.5">{{it.productName}}</td>
+                          <td class="p-1.5 font-mono text-slate-500">{{it.lotNo}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.weight)}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.unitPrice)}}</td>
+                          <td class="p-1.5 text-right font-semibold">{{fmt(it.netAmount)}}</td>
+                        </tr>
+                        <tr v-if="billItemsSummary(b.id).length===0">
+                          <td colspan="5" class="p-1.5 text-center text-slate-400">ไม่มีรายการสินค้าในบิล</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </template>
+          <tr v-if="!byCustomer.length"><td colspan="5" class="text-center py-8 text-slate-400">✅ ไม่มีลูกหนี้คงค้าง</td></tr>
         </tbody>
+        <tfoot v-if="byCustomer.length" class="bg-blue-50 font-bold">
+          <tr>
+            <td></td>
+            <td class="p-2">รวมทั้งหมด ({{byCustomer.length}} ลูกค้า)</td>
+            <td class="p-2 text-right">{{list.length}}</td>
+            <td class="p-2 text-right text-blue-700 text-lg">{{fmt(totalAR)}}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- 📷 V23 FLAT view — เรียงตามชื่อลูกค้า + subtotal/ลูกค้า + ลบ aging column -->
+    <div v-else class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left">Customer</th>
+          <th class="p-2 text-left">บิล</th>
+          <th class="p-2 text-left">วันที่</th>
+          <th class="p-2 text-left">Due</th>
+          <th class="p-2 text-right">ยอด</th>
+          <th class="p-2 text-right">รับแล้ว</th>
+          <th class="p-2 text-right">ค้างรับ</th>
+          <th class="p-2 text-left">Channel</th>
+        </tr></thead>
+        <tbody>
+          <template v-for="c in byCustomer" :key="c.customerId">
+            <tr v-for="b in c.bills" :key="b.id" class="border-t" :class="b.aging>30 ? 'bg-red-50/30' : (b.aging>0 ? 'bg-amber-50/20' : '')">
+              <td class="p-2">{{c.customerName}}</td>
+              <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
+              <td class="p-2">{{b.date}}</td>
+              <td class="p-2">{{b.dueDate}}</td>
+              <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
+              <td class="p-2 text-right text-emerald-600">{{fmt(b.receivedAmount)}}</td>
+              <td class="p-2 text-right font-bold text-amber-700">{{fmt(b.receivableBalance)}}</td>
+              <td class="p-2">{{erp.channelName(b.channelId, db.salesChannels)}}</td>
+            </tr>
+            <tr class="border-t-2 border-blue-200 bg-blue-50 font-bold">
+              <td class="p-2 text-right text-blue-700" colspan="6">▶ รวมค้างรับ {{c.customerName}} ({{c.bills.length}} บิล)</td>
+              <td class="p-2 text-right text-blue-700 text-base">{{fmt(c.total)}}</td>
+              <td></td>
+            </tr>
+          </template>
+          <tr v-if="!byCustomer.length"><td colspan="8" class="text-center py-8 text-slate-400">✅ ไม่มีลูกหนี้คงค้าง</td></tr>
+        </tbody>
+        <tfoot v-if="byCustomer.length" class="bg-blue-100 font-bold">
+          <tr>
+            <td class="p-2 text-right" colspan="6">รวมทั้งหมด ({{byCustomer.length}} ลูกค้า · {{list.length}} บิล)</td>
+            <td class="p-2 text-right text-blue-700 text-lg">{{fmt(totalAR)}}</td>
+            <td></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>`
@@ -10673,6 +10953,7 @@ app.component('view-ap', {
     const erp = window.$erp; const db = erp.db;
     const filterSupplier = ref(''); const filterChannel = ref(''); const filterAging = ref('');
     const viewMode = ref('summary'); // 'summary' | 'detail'
+    const expandedSupp = reactive({});  // 📷 V22: supplierId -> bool
     const today = new Date(erp.today());
     function ageDays(date) { return Math.floor((today - new Date(date)) / 86400000); }
     function ageBucket(d) { return d<=0?'Current':d<=30?'1-30':d<=60?'31-60':d<=90?'61-90':'>90'; }
@@ -10721,14 +11002,15 @@ app.component('view-ap', {
       { flush: 'post' }
     );
     const list = computed(() => _stableList.value);
-    /* Summary by Supplier */
+    /* Summary by Supplier — 📷 V22: bills = count (เดิม), billsList = array */
     const bySupplier = computed(() => {
       const map = new Map();
       list.value.forEach(r => {
         const k = r.supplierId || 'unknown';
-        if (!map.has(k)) map.set(k, { supplierId:k, supplierName:erp.supplierName(k), bills:0, total:0, overdue:0, oldest:0, current:0,b30:0,b60:0,b90:0,bGT90:0 });
+        if (!map.has(k)) map.set(k, { supplierId:k, supplierName:erp.supplierName(k), bills:0, billsList:[], total:0, overdue:0, oldest:0, current:0,b30:0,b60:0,b90:0,bGT90:0 });
         const x = map.get(k);
         x.bills++;
+        x.billsList.push(r);
         x.total += Number(r.payableBalance||0);
         if (r.aging > 0) x.overdue += Number(r.payableBalance||0);
         if (r.aging > x.oldest) x.oldest = r.aging;
@@ -10738,8 +11020,24 @@ app.component('view-ap', {
         else if (r.bucket==='61-90') x.b90 += Number(r.payableBalance||0);
         else x.bGT90 += Number(r.payableBalance||0);
       });
+      Array.from(map.values()).forEach(s => s.billsList.sort((a,b)=>b.aging-a.aging));
       return Array.from(map.values()).sort((a,b)=>b.total-a.total);
     });
+    /* 📷 V22: helpers สำหรับ expand-bill */
+    function toggleSupp(sid) { expandedSupp[sid] = !expandedSupp[sid]; }
+    function expandAllSupp() { bySupplier.value.forEach(s => expandedSupp[s.supplierId] = true); }
+    function collapseAllSupp() { Object.keys(expandedSupp).forEach(k => expandedSupp[k] = false); }
+    function pbItems(billId) {
+      const b = db.purchaseBills.find(x => x && x.id === billId);
+      if (!b || !b.items) return [];
+      return (b.items||[]).map(it => ({
+        productName: erp.productName(it.productId),
+        weight: Number(it.weight||it.netWeight||0),
+        unitPrice: Number(it.unitPrice||it.price||0),
+        netAmount: Number(it.netAmount||it.totalAmount|| (Number(it.weight||0) * Number(it.unitPrice||0))),
+        lotNo: it.lotNo || '-',
+      }));
+    }
     const byBucket = computed(() => {
       const buckets = ['Current','1-30','31-60','61-90','>90'];
       return buckets.map(k => ({
@@ -10771,8 +11069,10 @@ app.component('view-ap', {
     /* 📊 Top 5 suppliers */
     const topAP = computed(() => bySupplier.value.slice(0,5));
 
-    return { db, erp, filterSupplier, filterChannel, filterAging, viewMode, list, bySupplier, byBucket, topAP,
-      totalAP, overdueAP, dueIn7, exportCsv, exportSummary, bucketBadge, fmt:erp.fmt };
+    return { db, erp, filterSupplier, filterChannel, filterAging, viewMode, expandedSupp, list, bySupplier, byBucket, topAP,
+      totalAP, overdueAP, dueIn7, exportCsv, exportSummary, bucketBadge,
+      toggleSupp, expandAllSupp, collapseAllSupp, pbItems,
+      fmt:erp.fmt };
   },
   template: `
   <div>
@@ -10871,43 +11171,86 @@ app.component('view-ap', {
       <button @click="viewMode==='summary'?exportSummary():exportCsv()" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
     </div>
 
-    <!-- Summary view: by Supplier with aging breakdown -->
+    <!-- 📷 V23 Summary view: ลบ aging columns -->
     <div v-if="viewMode==='summary'" class="bg-white rounded-xl shadow overflow-x-auto">
+      <div class="flex gap-2 px-3 py-2 border-b">
+        <button @click="expandAllSupp" class="bg-slate-100 px-3 py-1.5 rounded text-xs">▼ ขยายทุก Supplier</button>
+        <button @click="collapseAllSupp" class="bg-slate-100 px-3 py-1.5 rounded text-xs">▶ ย่อทั้งหมด</button>
+        <span class="ml-auto text-xs text-slate-500 self-center">คลิกแถว Supplier เพื่อขยายดูรายบิล + สินค้าในบิล</span>
+      </div>
       <table class="w-full text-sm">
         <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left w-8"></th>
           <th class="p-2 text-left">Supplier</th>
           <th class="p-2 text-right">บิล</th>
-          <th class="p-2 text-right">Current</th>
-          <th class="p-2 text-right">1-30 วัน</th>
-          <th class="p-2 text-right">31-60</th>
-          <th class="p-2 text-right">61-90</th>
-          <th class="p-2 text-right">&gt;90</th>
           <th class="p-2 text-right">รวมค้างจ่าย</th>
           <th class="p-2 text-right">เกินกำหนดสุด</th>
         </tr></thead>
         <tbody>
-          <tr v-for="s in bySupplier" :key="s.supplierId" class="border-t hover:bg-red-50/30" :class="s.oldest>30?'bg-red-50/40':s.oldest>0?'bg-amber-50/30':''">
-            <td class="p-2 font-medium">{{s.supplierName}}</td>
-            <td class="p-2 text-right">{{s.bills}}</td>
-            <td class="p-2 text-right text-slate-600">{{s.current?fmt(s.current):'-'}}</td>
-            <td class="p-2 text-right text-yellow-700">{{s.b30?fmt(s.b30):'-'}}</td>
-            <td class="p-2 text-right text-amber-700">{{s.b60?fmt(s.b60):'-'}}</td>
-            <td class="p-2 text-right text-orange-700">{{s.b90?fmt(s.b90):'-'}}</td>
-            <td class="p-2 text-right text-red-700 font-bold">{{s.bGT90?fmt(s.bGT90):'-'}}</td>
-            <td class="p-2 text-right font-bold text-red-700 text-base">{{fmt(s.total)}}</td>
-            <td class="p-2 text-right" :class="s.oldest>30?'text-red-700 font-bold':s.oldest>0?'text-amber-700':'text-slate-500'">{{s.oldest>0?s.oldest+' วัน':'-'}}</td>
-          </tr>
-          <tr v-if="!bySupplier.length"><td colspan="9" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
+          <template v-for="s in bySupplier" :key="s.supplierId">
+            <tr class="border-t cursor-pointer hover:bg-red-50/30 font-semibold" @click="toggleSupp(s.supplierId)"
+              :class="s.oldest>30?'bg-red-50/40':s.oldest>0?'bg-amber-50/30':''">
+              <td class="p-2 text-red-600">{{expandedSupp[s.supplierId]?'▼':'▶'}}</td>
+              <td class="p-2">{{s.supplierName}}</td>
+              <td class="p-2 text-right">{{s.bills}}</td>
+              <td class="p-2 text-right font-bold text-red-700 text-base">{{fmt(s.total)}}</td>
+              <td class="p-2 text-right" :class="s.oldest>30?'text-red-700 font-bold':s.oldest>0?'text-amber-700':'text-slate-500'">{{s.oldest>0?s.oldest+' วัน':'-'}}</td>
+            </tr>
+            <!-- BILL DETAILS -->
+            <tr v-if="expandedSupp[s.supplierId]" class="bg-slate-50/40">
+              <td></td>
+              <td colspan="4" class="p-2">
+                <div class="space-y-2">
+                  <div v-for="b in s.billsList" :key="b.id" class="bg-white border rounded-lg p-3 shadow-sm"
+                    :class="b.aging>30?'border-red-300':b.aging>0?'border-amber-300':'border-slate-200'">
+                    <div class="flex flex-wrap items-center gap-3 mb-2 pb-2 border-b">
+                      <span class="font-mono font-bold text-red-600">📄 {{b.docNo}}</span>
+                      <span class="text-xs text-slate-500">วันที่ {{b.date}}</span>
+                      <span class="text-xs text-slate-500">Due {{b.dueDate}}</span>
+                      <span class="text-xs px-2 py-0.5 rounded font-bold"
+                        :class="b.aging>30?'bg-red-100 text-red-700':b.aging>0?'bg-amber-100 text-amber-700':'bg-slate-100 text-slate-600'">
+                        {{b.bucket}} ({{b.aging>0?'เกิน '+b.aging+' วัน':b.aging===0?'ครบกำหนดวันนี้':'ยังไม่ครบ'}})
+                      </span>
+                      <span class="text-xs text-slate-500">Channel: {{erp.channelName(b.channelId, db.purchaseChannels)}}</span>
+                      <span class="ml-auto text-xs">ยอดบิล: <b class="text-slate-700">{{fmt(b.totalAmount)}}</b></span>
+                      <span class="text-xs text-emerald-600">จ่ายแล้ว: <b>{{fmt(b.paidAmount)}}</b></span>
+                      <span class="text-xs">ค้างจ่าย: <b class="text-red-600 text-base">{{fmt(b.payableBalance)}}</b></span>
+                    </div>
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-50">
+                        <tr>
+                          <th class="p-1.5 text-left">สินค้า</th>
+                          <th class="p-1.5 text-left">Lot</th>
+                          <th class="p-1.5 text-right">น้ำหนัก (กก.)</th>
+                          <th class="p-1.5 text-right">ราคา/กก.</th>
+                          <th class="p-1.5 text-right">รวม</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(it, i) in pbItems(b.id)" :key="i" class="border-t">
+                          <td class="p-1.5">{{it.productName}}</td>
+                          <td class="p-1.5 font-mono text-slate-500">{{it.lotNo}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.weight)}}</td>
+                          <td class="p-1.5 text-right">{{fmt(it.unitPrice)}}</td>
+                          <td class="p-1.5 text-right font-semibold">{{fmt(it.netAmount)}}</td>
+                        </tr>
+                        <tr v-if="pbItems(b.id).length===0">
+                          <td colspan="5" class="p-1.5 text-center text-slate-400">ไม่มีรายการสินค้าในบิล</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </template>
+          <tr v-if="!bySupplier.length"><td colspan="5" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
         </tbody>
         <tfoot v-if="bySupplier.length" class="bg-slate-100 font-bold">
           <tr>
+            <td></td>
             <td class="p-2">รวมทั้งหมด ({{bySupplier.length}} Supplier)</td>
             <td class="p-2 text-right">{{list.length}}</td>
-            <td class="p-2 text-right">{{fmt(byBucket[0].total)}}</td>
-            <td class="p-2 text-right">{{fmt(byBucket[1].total)}}</td>
-            <td class="p-2 text-right">{{fmt(byBucket[2].total)}}</td>
-            <td class="p-2 text-right">{{fmt(byBucket[3].total)}}</td>
-            <td class="p-2 text-right text-red-700">{{fmt(byBucket[4].total)}}</td>
             <td class="p-2 text-right text-red-700 text-lg">{{fmt(totalAP)}}</td>
             <td></td>
           </tr>
@@ -10915,25 +11258,45 @@ app.component('view-ap', {
       </table>
     </div>
 
-    <!-- Detail view: per bill -->
+    <!-- 📷 V23 Detail view (flat): เรียงตามชื่อ Supplier + subtotal/Supplier -->
     <div v-else class="bg-white rounded-xl shadow overflow-x-auto">
-      <table class="w-full text-sm table-zebra">
-        <thead class="bg-slate-100"><tr><th class="p-2 text-left">Supplier</th><th class="p-2 text-left">บิล</th><th class="p-2 text-left">วันที่</th><th class="p-2 text-left">Due</th><th class="p-2 text-center">Aging</th><th class="p-2 text-right">ยอด</th><th class="p-2 text-right">จ่ายแล้ว</th><th class="p-2 text-right">ค้างจ่าย</th><th class="p-2 text-left">Channel</th></tr></thead>
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left">Supplier</th>
+          <th class="p-2 text-left">บิล</th>
+          <th class="p-2 text-left">วันที่</th>
+          <th class="p-2 text-left">Due</th>
+          <th class="p-2 text-right">ยอด</th>
+          <th class="p-2 text-right">จ่ายแล้ว</th>
+          <th class="p-2 text-right">ค้างจ่าย</th>
+          <th class="p-2 text-left">Channel</th>
+        </tr></thead>
         <tbody>
-          <tr v-for="r in list" :key="r.id" class="border-t" :class="r.aging>30?'bg-red-50/50':r.aging>0?'bg-amber-50/30':''">
-            <td class="p-2">{{erp.supplierName(r.supplierId)}}</td>
-            <td class="p-2 font-mono text-blue-600">{{r.docNo}}</td>
-            <td class="p-2">{{r.date}}</td><td class="p-2">{{r.dueDate}}</td>
-            <td class="p-2 text-center"><span :class="['px-2 py-0.5 rounded text-xs', bucketBadge(r.bucket)]">{{r.bucket}} ({{r.aging}})</span></td>
-            <td class="p-2 text-right">{{fmt(r.totalAmount)}}</td>
-            <td class="p-2 text-right text-emerald-600">{{fmt(r.paidAmount)}}</td>
-            <td class="p-2 text-right font-bold text-red-600">{{fmt(r.payableBalance)}}</td>
-            <td class="p-2">{{erp.channelName(r.channelId, db.purchaseChannels)}}</td>
-          </tr>
-          <tr v-if="list.length===0"><td colspan="9" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
+          <template v-for="s in bySupplier" :key="s.supplierId">
+            <tr v-for="b in s.billsList" :key="b.id" class="border-t" :class="b.aging>30?'bg-red-50/30':b.aging>0?'bg-amber-50/20':''">
+              <td class="p-2">{{s.supplierName}}</td>
+              <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td>
+              <td class="p-2">{{b.date}}</td>
+              <td class="p-2">{{b.dueDate}}</td>
+              <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
+              <td class="p-2 text-right text-emerald-600">{{fmt(b.paidAmount)}}</td>
+              <td class="p-2 text-right font-bold text-red-600">{{fmt(b.payableBalance)}}</td>
+              <td class="p-2">{{erp.channelName(b.channelId, db.purchaseChannels)}}</td>
+            </tr>
+            <tr class="border-t-2 border-red-200 bg-red-50 font-bold">
+              <td class="p-2 text-right text-red-700" colspan="6">▶ รวมค้างจ่าย {{s.supplierName}} ({{s.bills}} บิล)</td>
+              <td class="p-2 text-right text-red-700 text-base">{{fmt(s.total)}}</td>
+              <td></td>
+            </tr>
+          </template>
+          <tr v-if="!bySupplier.length"><td colspan="8" class="text-center py-8 text-slate-400">ไม่มีเจ้าหนี้คงค้าง</td></tr>
         </tbody>
-        <tfoot v-if="list.length" class="bg-slate-100 font-bold">
-          <tr><td colspan="7" class="p-2 text-right">รวมค้างจ่ายทั้งหมด</td><td class="p-2 text-right text-red-700 text-lg">{{fmt(totalAP)}}</td><td></td></tr>
+        <tfoot v-if="bySupplier.length" class="bg-red-100 font-bold">
+          <tr>
+            <td class="p-2 text-right" colspan="6">รวมทั้งหมด ({{bySupplier.length}} Supplier · {{list.length}} บิล)</td>
+            <td class="p-2 text-right text-red-700 text-lg">{{fmt(totalAP)}}</td>
+            <td></td>
+          </tr>
         </tfoot>
       </table>
     </div>
@@ -13862,7 +14225,9 @@ app.component('view-purchase', {
         showForm.value = true;
       } catch (e) { console.error('open:', e); alert('Error: ' + e.message); }
     }
-    /* 🆕 เปิดบิลซื้อจากใบชั่ง — เลือก ticket แล้ว auto-fill */
+    /* 🆕 เปิดบิลซื้อจากใบชั่ง — เลือก ticket แล้ว auto-fill
+       📷 V23: รวม items ที่ productId เดียวกัน → 1 row + เก็บ snapshot น้ำหนักต้นทาง
+              + force transactionMode='STOCK' (บิลซื้อจากใบชั่งต้องอยู่ในหมวด Stock เท่านั้น) */
     function _applyTicketToForm(ticket) {
       try {
         open();
@@ -13875,14 +14240,30 @@ app.component('view-purchase', {
         form.value.licensePlate = ticket.licensePlate || '';
         form.value.refNo = ticket.docNo;
         if (ticket.branchId) form.value.branchId = ticket.branchId;
-        form.value.items = (ticket.items || []).map(it => {
+        // 📷 V23: บังคับ transactionMode='STOCK' (บิลซื้อจากใบชั่งห้ามเป็น TRADING)
+        form.value.transactionMode = 'STOCK';
+        // 📷 V23: GROUP BY productId — รวมเต๋าทุกเต๋าของสินค้าเดียวกัน → 1 row
+        const grouped = new Map();  // productId -> { productId, displayName, netWeight }
+        (ticket.items || []).forEach(it => {
+          const pid = it.productId || '';
+          const key = pid || ('NAME:'+(it.productName||''));   // กรณีไม่มี productId กลุ่มตามชื่อ
+          if (!grouped.has(key)) grouped.set(key, { productId: pid, displayName: it.productName||'', netWeight: 0 });
+          const g = grouped.get(key);
+          g.netWeight += Number(it.netWeight || 0);
+        });
+        form.value.items = Array.from(grouped.values()).map(g => {
           const base = blankItem();
-          base.productId = it.productId || '';
-          base.displayName = it.productName || '';
-          base.netWeight = Number(it.netWeight || 0);
+          base.productId = g.productId;
+          base.displayName = g.displayName;
+          base.netWeight = Number(g.netWeight.toFixed(2));
           return base;
         });
         if (form.value.items.length === 0) form.value.items = [blankItem()];
+        // 📷 V23: snapshot น้ำหนักต้นทางต่อ productId — ใช้ validate split
+        form.value._weighingWeightByProduct = {};
+        grouped.forEach((g, key) => {
+          form.value._weighingWeightByProduct[key] = Number(g.netWeight.toFixed(2));
+        });
         const impLines = (ticket.items || []).map((it, idx) => {
           if (!it.impurityType && !Number(it.impurityValue)) return null;
           const prodNm = (db.products || []).find(p => p && p.id === it.productId);
@@ -13976,6 +14357,45 @@ app.component('view-purchase', {
       if (form.value.items.length <= 1) return;
       form.value.items.splice(idx, 1);
     }
+    /* 📷 V23: ✂️ แยกราคา — สร้าง row ใหม่ของสินค้าเดียวกัน แบ่งน้ำหนัก 50/50 ให้ user ปรับ */
+    function splitItem(idx) {
+      const orig = form.value.items[idx];
+      if (!orig.productId) { alert('กรุณาเลือกสินค้าก่อนแยกราคา'); return; }
+      const half = Math.round(Number(orig.netWeight||0) * 50) / 100;
+      const rest = Number((Number(orig.netWeight||0) - half).toFixed(2));
+      orig.netWeight = half;
+      orig.netAmount = num(orig.netWeight) * num(orig.price);
+      const dup = blankItem();
+      dup.productId = orig.productId;
+      dup.displayName = orig.displayName;
+      dup.netWeight = rest;
+      dup.price = orig.price || 0;
+      dup.netAmount = num(dup.netWeight) * num(dup.price);
+      form.value.items.splice(idx+1, 0, dup);
+    }
+    /* 📷 V23: ตรวจสอบน้ำหนักรวมต่อสินค้า vs น้ำหนักต้นทางจากใบชั่ง */
+    const weighingCheck = computed(() => {
+      const target = form.value._weighingWeightByProduct || {};
+      if (!target || !Object.keys(target).length) return { ok: true, byProduct: [] };
+      const actualMap = {};
+      (form.value.items||[]).forEach(it => {
+        const key = it.productId || ('NAME:'+(it.displayName||''));
+        actualMap[key] = (actualMap[key] || 0) + Number(it.netWeight||0);
+      });
+      const out = [];
+      let allOk = true;
+      Object.keys(target).forEach(key => {
+        const t = Number(target[key]||0);
+        const a = Number((actualMap[key]||0).toFixed(2));
+        const diff = Number((a - t).toFixed(2));
+        const ok = Math.abs(diff) < 0.01;
+        if (!ok) allOk = false;
+        const pid = key.startsWith('NAME:') ? '' : key;
+        const pname = pid ? (erp.productName ? erp.productName(pid) : pid) : key.replace('NAME:','');
+        out.push({ productId: pid, productName: pname, target: t, actual: a, diff, ok });
+      });
+      return { ok: allOk, byProduct: out };
+    });
     function recalcItem(it) {
       // 🔧 BUG FIX: เลิก auto-overwrite netWeight ทุกครั้ง — รบกวน user ตอนแก้ net เอง
       // ใช้ onGrossOrTareChange แทน — เฉพาะตอนแก้ gross/tare → คำนวณ net ใหม่
@@ -14075,11 +14495,23 @@ app.component('view-purchase', {
     async function save() {
       try {
         const f = form.value;
+        // 📷 V23: ถ้ามาจากใบชั่ง → บังคับ STOCK + ห้าม TRADING
+        if (f._fromWeighingId) f.transactionMode = 'STOCK';
         const isTrading = f.transactionMode === 'TRADING';
         if (!f.supplierId) { alert('เลือก Supplier'); return; }
         if (!isTrading && !f.branchId) { alert('เลือกสาขา'); return; }
         if (!isTrading && !f.warehouseId) { alert('เลือกคลัง'); return; }
         if (!isTrading && !f.channelId) { alert('เลือกช่องทางรับซื้อ'); return; }
+        // 📷 V23: validate น้ำหนักรวมต่อสินค้า vs ใบชั่ง
+        if (f._fromWeighingId && f._weighingWeightByProduct) {
+          const check = weighingCheck.value;
+          if (!check.ok) {
+            const bad = check.byProduct.filter(b => !b.ok)
+              .map(b => `  • ${b.productName}: ต้องการ ${b.target.toLocaleString()} กก. มีจริง ${b.actual.toLocaleString()} กก. (${b.diff>0?'+':''}${b.diff})`);
+            alert('❌ น้ำหนักไม่ตรงใบชั่ง — ห้ามบันทึก\n\n'+bad.join('\n')+'\n\n💡 ถ้าแยกราคา → น้ำหนักรวมของสินค้านั้นต้องเท่าเดิม');
+            return;
+          }
+        }
         // 🆕 Trading mode: ล้าง branch + warehouse + channel (Trading เป็นของมันเอง — ยอด/กำไรไปฝั่ง Trading)
         if (isTrading) { f.branchId = ''; f.warehouseId = ''; f.channelId = ''; }
         // 🛡️ Anti-collision: ตรวจ docNo ซ้ำทั้ง local + cloud (กันเครื่องอื่น save พร้อมกัน)
@@ -14991,6 +15423,7 @@ app.component('view-purchase', {
       // 🆕 Robust Supplier picker
       supplierSearchTerm, filteredSuppliers, onSupplierPicked, quickAddSupplier,
       addItem, removeItem, recalcItem, onGrossOrTareChange, onNetChange,
+      splitItem, weighingCheck,   /* 📷 V23: weighing → PB split + check */
       fmt, supplierName, branchName, channelName, accountName, productName,
       availablePOBuys, availablePOBuysForItem, loadFromPO, setSource,
       // Swap
@@ -15152,10 +15585,17 @@ app.component('view-purchase', {
         </div>
         <div class="p-6 space-y-4 text-sm overflow-y-auto flex-1 bg-slate-50">
 
-          <!-- 🔥 SECTION 1: ประเภทบิล -->
+          <!-- 🔥 SECTION 1: ประเภทบิล — 📷 V23: ถ้ามาจากใบชั่ง ล็อกเป็น STOCK เท่านั้น -->
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
             <h4 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><span class="w-6 h-6 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xs">1</span> ประเภทบิล</h4>
-            <div class="grid grid-cols-2 gap-3 mb-3">
+            <div v-if="form._fromWeighingId" class="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 mb-3 flex items-center gap-3">
+              <span class="text-2xl">📦</span>
+              <div>
+                <div class="font-bold text-emerald-700">บิลซื้อจากใบชั่ง — ล็อกเป็นโหมด STOCK</div>
+                <div class="text-xs text-emerald-600">เข้า Stock + คำนวณ WAC ปกติ · ห้ามเปลี่ยนเป็น Trading</div>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-2 gap-3 mb-3">
               <label class="flex items-center gap-3 p-3 rounded-lg cursor-pointer border-2 transition" :class="form.transactionMode==='STOCK'?'border-emerald-500 bg-emerald-50':'border-slate-200 bg-white hover:border-slate-300'">
                 <input type="radio" v-model="form.transactionMode" value="STOCK" class="w-5 h-5">
                 <div>
@@ -15302,6 +15742,28 @@ app.component('view-purchase', {
               <h4 class="text-sm font-bold text-slate-700 flex items-center gap-2"><span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs">3</span> รายการสินค้า ({{form.items.length}})</h4>
               <button type="button" @click="addItem" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow">+ เพิ่มรายการ</button>
             </div>
+            <!-- 📷 V23: WEIGHING CHECK BANNER — เปรียบเทียบน้ำหนักรวมต่อสินค้า vs ใบชั่ง -->
+            <div v-if="form._fromWeighingId && weighingCheck.byProduct.length" class="mb-3 rounded-lg border-2 p-3 text-sm"
+              :class="weighingCheck.ok ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-400'">
+              <div class="flex items-center justify-between mb-2">
+                <span class="font-bold" :class="weighingCheck.ok?'text-emerald-700':'text-red-700'">
+                  {{weighingCheck.ok?'✅ น้ำหนักตรงใบชั่ง':'❌ น้ำหนักไม่ตรง — แก้ก่อนบันทึก'}}
+                </span>
+                <span class="text-xs text-slate-500">💡 แยกราคาได้ (กดปุ่ม ✂️) แต่น้ำหนักรวมต่อสินค้าต้องเท่าเดิม</span>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-1 text-xs">
+                <div v-for="b in weighingCheck.byProduct" :key="b.productName"
+                  class="flex justify-between px-2 py-1 rounded"
+                  :class="b.ok?'bg-white':'bg-red-100'">
+                  <span>{{b.productName}}</span>
+                  <span :class="b.ok?'text-emerald-700':'text-red-700 font-bold'">
+                    {{fmt(b.actual)}}/{{fmt(b.target)}} กก.
+                    <span v-if="!b.ok">({{b.diff>0?'+':''}}{{fmt(b.diff)}})</span>
+                    <span v-else>✓</span>
+                  </span>
+                </div>
+              </div>
+            </div>
             <div class="overflow-x-auto border rounded-lg">
               <table class="w-full text-sm">
                 <thead class="bg-gradient-to-r from-slate-100 to-slate-50">
@@ -15367,7 +15829,13 @@ app.component('view-purchase', {
                     </td>
                     <td class="p-2 text-right font-bold text-blue-700 bg-blue-50 px-3 rounded">{{fmt(it.netAmount)}}</td>
                     <td class="p-2 text-center">
-                      <button type="button" v-if="form.items.length>1" @click="removeItem(idx)" class="text-red-500 hover:bg-red-100 rounded-full w-8 h-8" title="ลบรายการ">×</button>
+                      <div class="flex flex-col gap-1 items-center">
+                        <!-- 📷 V23: ✂️ แยกราคา — สำหรับแยก row ของสินค้าเดียวกัน (ใช้ตอนต้องการ price ต่างกัน) -->
+                        <button type="button" v-if="it.productId" @click="splitItem(idx)"
+                          class="text-amber-600 hover:bg-amber-100 rounded px-1 text-xs"
+                          :title="'✂️ แยก row นี้เป็น 2 rows (แบ่งน้ำหนัก 50/50) — ตั้งราคาต่างกันได้ น้ำหนักรวมต้องเท่าเดิม'">✂️</button>
+                        <button type="button" v-if="form.items.length>1" @click="removeItem(idx)" class="text-red-500 hover:bg-red-100 rounded-full w-7 h-7" title="ลบรายการ">×</button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -22272,6 +22740,26 @@ app.component('view-productionReport', {
       return Object.values(r).map(x => ({...x, unitCost: x.qty>0 ? x.cost/x.qty : 0})).sort((a,b)=>b.qty-a.qty);
     });
 
+    /* 📷 V22: WIP — รวมจาก view-wipReport เดิมเข้ามา */
+    const todayD = new Date(erp.today());
+    const wipList = computed(() => db.productionOrders.filter(p => H.wipBalance(p.id) > 0).map(p => {
+      const ageDays = Math.floor((todayD - new Date(p.date)) / 86400000);
+      const wipQty = H.wipBalance(p.id);
+      const inCost = H.totalInputCost(p.id);
+      const inQty = H.totalInputQty(p.id);
+      const wac = inQty > 0 ? inCost / inQty : 0;
+      return { ...p, wipQty, totalInputQtyWip: inQty, wac, wipValue: wipQty * wac, ageDays };
+    }).sort((a,b) => b.ageDays - a.ageDays));
+    const wipTotals = computed(() => {
+      let qty = 0, value = 0, over30 = 0, over14 = 0;
+      wipList.value.forEach(r => {
+        qty += r.wipQty; value += r.wipValue;
+        if (r.ageDays > 30) over30 += r.wipQty;
+        if (r.ageDays > 14) over14 += r.wipQty;
+      });
+      return { qty, value, over30, over14, count: wipList.value.length };
+    });
+
     function exportCsv() {
       const rows = [['Date','DocNo','Type','Machine','Status','Input','Output','Loss','Yield%','RM Cost','Process','Total Cost','฿/Kg']];
       data.value.forEach(p => rows.push([p.date, p.docNo, p.productionType, db.machines.find(m=>m.id===p.machineId)?.name||'-', p.status, p.totalInputQty, p.totalOutputQty, p.totalLossQty, p.yieldPct.toFixed(2), p.totalRMCost, p.totalProcessCost, p.totalProductionCost, p.costPerKg.toFixed(2)]));
@@ -22287,7 +22775,9 @@ app.component('view-productionReport', {
         }
       } catch(e) { erp.showToast('Refresh fail: '+e.message,'error'); }
     }
-    return { db, erp, fromDate, toDate, filterMachine, filterBranch, filterStatus, data, totals, byProduct, exportCsv, forceRefresh, fmt:erp.fmt };
+    return { db, erp, fromDate, toDate, filterMachine, filterBranch, filterStatus, data, totals, byProduct,
+      wipList, wipTotals,  // 📷 V22
+      exportCsv, forceRefresh, fmt:erp.fmt };
   },
   template: `
   <div>
@@ -22309,6 +22799,48 @@ app.component('view-productionReport', {
       <div class="bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-xl shadow p-3"><div class="text-xs opacity-80">ต้นทุนผลิต</div><div class="text-lg font-bold">{{fmt(totals.totalCost)}}</div></div>
       <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">฿/กก. เฉลี่ย</div><div class="text-lg font-bold">{{fmt(totals.costPerKg)}}</div></div>
     </div>
+    <!-- 📷 V22: WIP คงเหลือ — รวมจากหน้า WIP เดิม -->
+    <div class="bg-white rounded-xl shadow mb-4 overflow-x-auto border-l-4 border-amber-500">
+      <div class="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex items-center justify-between flex-wrap gap-2">
+        <h3 class="font-bold text-amber-800">⏳ WIP คงเหลือ (Work-in-Progress) — ของที่ยังผลิตค้างอยู่</h3>
+        <div class="flex gap-3 text-xs">
+          <span>📋 <b>{{wipTotals.count}}</b> ใบ</span>
+          <span>⚖️ รวม <b class="text-amber-700">{{fmt(wipTotals.qty)}}</b> กก.</span>
+          <span>💰 มูลค่า <b class="text-amber-700">{{fmt(wipTotals.value)}}</b></span>
+          <span v-if="wipTotals.over30>0" class="text-red-600">⚠ ค้าง &gt;30 วัน: <b>{{fmt(wipTotals.over30)}}</b> กก.</span>
+        </div>
+      </div>
+      <table class="w-full text-sm table-zebra">
+        <thead class="bg-slate-100"><tr>
+          <th class="p-2 text-left">ใบสั่งผลิต</th>
+          <th class="p-2 text-left">วันที่เริ่ม</th>
+          <th class="p-2 text-right">อายุ (วัน)</th>
+          <th class="p-2 text-left">สาขา</th>
+          <th class="p-2 text-left">เครื่องจักร</th>
+          <th class="p-2 text-right">Input</th>
+          <th class="p-2 text-right">Output</th>
+          <th class="p-2 text-right">WIP Qty</th>
+          <th class="p-2 text-right">WIP Value</th>
+          <th class="p-2 text-center">สถานะ</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="r in wipList" :key="r.id" class="border-t" :class="r.ageDays>30?'bg-red-50/50':r.ageDays>14?'bg-amber-50/30':''">
+            <td class="p-2 font-mono text-xs text-blue-700">{{r.docNo}}</td>
+            <td class="p-2">{{r.date}}</td>
+            <td class="p-2 text-right" :class="r.ageDays>30?'text-red-600 font-bold':r.ageDays>14?'text-amber-700':''">{{r.ageDays}}</td>
+            <td class="p-2">{{erp.branchName(r.branchId)}}</td>
+            <td class="p-2 text-xs">{{db.machines.find(m=>m.id===r.machineId)?.name||'-'}}</td>
+            <td class="p-2 text-right">{{fmt(r.totalInputQtyWip)}}</td>
+            <td class="p-2 text-right text-emerald-700">{{fmt(r.totalInputQtyWip - r.wipQty)}}</td>
+            <td class="p-2 text-right font-bold text-amber-700">{{fmt(r.wipQty)}}</td>
+            <td class="p-2 text-right">{{fmt(r.wipValue)}}</td>
+            <td class="p-2 text-center text-xs">{{r.status}}</td>
+          </tr>
+          <tr v-if="wipList.length===0"><td colspan="10" class="text-center py-6 text-emerald-600">✅ ไม่มี WIP คงเหลือ — ผลิตเสร็จทุกใบ</td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="bg-white rounded-xl shadow mb-4 overflow-x-auto">
       <h3 class="px-4 py-3 border-b font-semibold">📦 ผลผลิตแยกตามสินค้า</h3>
       <table class="w-full text-sm table-zebra">
@@ -43760,7 +44292,7 @@ function _allMenuItems() {
     // Trading
     'tradingDashboard','tradingMatching',
     // Production
-    'production','productionDashboard','productionReport','wipReport','machineUtil','productionCostReport','yieldLossReport',
+    'production','productionDashboard','productionReport','machineUtil','productionCostReport','yieldLossReport',
     // Dual Costing
     'poBuy','poSell','costPool','costAllocator','waitingAllocations','costAllocationLedger','dualCostingReport','dualMargin','matchLog','dealMargin','compareMargin',
     // Grade Adjustment + Status Convert
