@@ -2717,6 +2717,33 @@ function seedData() {
     transfers: [],    // โอนเงินระหว่างบัญชี
     expenses: [],     // ค่าใช้จ่าย
     transferStocks: [], // โอนสินค้าระหว่างสาขา
+
+    /* 📱 V25: LINE Notify config — webhook + event toggles + log */
+    lineNotifyConfig: {
+      enabled: false,
+      webhookUrl: '',
+      defaultGroup: '',
+      events: {
+        PB_CREATE:           { enabled: true,  label: '🛒 บิลซื้อใหม่' },
+        PB_UPDATE:           { enabled: false, label: '✏️ แก้บิลซื้อ' },
+        SB_CREATE:           { enabled: true,  label: '💰 บิลขาย / Sales Order' },
+        SB_PACKING:          { enabled: true,  label: '📦 Packing List (auto)' },
+        RECEIPT_CREATE:      { enabled: true,  label: '✅ รับเงินลูกค้า' },
+        PAYMENT_CREATE:      { enabled: true,  label: '💸 จ่ายเงิน Supplier' },
+        PO_SELL_CREATE:      { enabled: true,  label: '📋 PO ขายใหม่' },
+        PO_SELL_STATUS:      { enabled: true,  label: '🔄 PO ขาย: เปลี่ยน status' },
+        PO_BUY_CREATE:       { enabled: true,  label: '📋 PO ซื้อใหม่' },
+        PO_BUY_STATUS:       { enabled: false, label: '🔄 PO ซื้อ: เปลี่ยน status' },
+        PRODUCTION_INPUT:    { enabled: false, label: '🏭 เบิกวัตถุดิบเข้าผลิต' },
+        PRODUCTION_OUTPUT:   { enabled: true,  label: '🏭 บันทึก Output' },
+        PRODUCTION_STATUS:   { enabled: true,  label: '🏭 PO ผลิต: เปลี่ยน status' },
+        STOCK_ISSUE:         { enabled: true,  label: '📤 เบิก Pending Sale' },
+        COST_ALLOC_CONFIRM:  { enabled: false, label: '🔗 จับคู่ต้นทุน confirm' },
+        ANOMALY_DETECTED:    { enabled: true,  label: '🚨 พบความผิดปกติ' },
+        TEST:                { enabled: true,  label: '🧪 ทดสอบ' },
+      },
+      notifyLog: [],
+    },
     /* INTL FINANCE — Masters */
     currencies: [
       {id:'CUR-THB', code:'THB', name:'บาท', decimal:2, active:true},
@@ -2837,32 +2864,32 @@ function seedData() {
       /* === Custom Roles ที่ใช้จริงในบริษัท (แก้/ลบได้) === */
       { id:'R-ACCOUNTANT', name:'บัญชี', desc:'บัญชี — งบการเงิน, AR/AP, ภาษี + บิลซื้อ/ขาย (ไม่มีค่าใช้จ่าย — แยกให้บัญชีค่าใช้จ่าย)', isSystem:false,
         // 🚫 REMOVE: expense, pettyAdvance, expenseDashboard, mdExpense (ย้ายไป R-ACCOUNT-EXPENSE)
-        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','transfer','paymentApproval','billSwapHistory','stockBalance','stockLedger','tradingDashboard','tradingMatching','poBuy','poSell','poOutstanding','reports','audit','salesPlan','pendingSales','stockPlanning','ar','ap','bank','cashPosition','plStatement','balanceSheet','cashFlowStatement','cashFlowAnalysis','workingCapital','taxVAT','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdAccount','mdImport','equityMaint','historicalData','backup','companyProfile'],
+        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','transfer','paymentApproval','billSwapHistory','stockBalance','stockLedger','tradingDashboard','tradingMatching','poBuy','poSell','poOutstanding','reports','audit','salesPlan','pendingSales','stockPlanning','ar','ap','bank','cashPosition','plStatement','balanceSheet','cashFlowStatement','cashFlowAnalysis','workingCapital','taxVAT','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdAccount','mdImport','equityMaint','historicalData','backup','companyProfile','lineNotify'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:true, seeCash:true, seeFinancials:true, seeOpening:false,
         branchScope:'all' },
       /* 🆕 บัญชีค่าใช้จ่าย — เห็นทุกอย่างเหมือนบัญชี + ค่าใช้จ่าย (สำหรับ NS-June) */
       { id:'R-ACCOUNT-EXPENSE', name:'บัญชีค่าใช้จ่าย', desc:'บัญชีค่าใช้จ่าย — เหมือนบัญชี + ค่าใช้จ่าย/petty advance/หมวดค่าใช้จ่าย', isSystem:false,
-        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','transfer','expense','pettyAdvance','expenseDashboard','paymentApproval','billSwapHistory','stockBalance','stockLedger','tradingDashboard','tradingMatching','poBuy','poSell','poOutstanding','reports','audit','salesPlan','pendingSales','stockPlanning','ar','ap','bank','cashPosition','plStatement','balanceSheet','cashFlowStatement','cashFlowAnalysis','workingCapital','taxVAT','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdAccount','mdExpense','mdImport','equityMaint','historicalData','backup','companyProfile'],
+        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','transfer','expense','pettyAdvance','expenseDashboard','paymentApproval','billSwapHistory','stockBalance','stockLedger','tradingDashboard','tradingMatching','poBuy','poSell','poOutstanding','reports','audit','salesPlan','pendingSales','stockPlanning','ar','ap','bank','cashPosition','plStatement','balanceSheet','cashFlowStatement','cashFlowAnalysis','workingCapital','taxVAT','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdAccount','mdExpense','mdImport','equityMaint','historicalData','backup','companyProfile','lineNotify'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:true, seeCash:true, seeFinancials:true, seeOpening:false,
         branchScope:'all' },
       { id:'R-COORDINATOR', name:'ประสานงาน', desc:'ประสานงาน — กรอกบิลซื้อ/ขาย, Stock, Trading, PO, ใบสำคัญรับเงิน, ปรับสถานะ/เกรด', isSystem:false,
         // 🆕 ADD: receiptVoucher, statusConvert, gradeAdjustment, customerReturn, costPool, costAllocator, matchLog
         // 🚫 REMOVE: paymentApproval, salesCommission (จำกัด Sales Tracking ให้ Poopae เท่านั้น)
-        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','receiptVoucher','statusConvert','gradeAdjustment','stockAdjust','customerReturn','stockBalance','stockLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','costPool','costAllocator','waitingAllocations','costAllocationLedger','dualCostingReport','matchLog','reports','backup','companyProfile'],
+        menus:['changePassword','weighing','purchase','sales','stockIssue','payment','receipt','receiptVoucher','statusConvert','gradeAdjustment','stockAdjust','customerReturn','stockBalance','stockLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','costPool','costAllocator','waitingAllocations','costAllocationLedger','dualCostingReport','matchLog','reports','backup','companyProfile','lineNotify'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:false, seeCash:false, seeFinancials:false, seeOpening:false,
         branchScope:'all' },
       { id:'R-POOPAE', name:'Poopae', desc:'Role พิเศษ — เข้าถึงพิเศษ + Production + Asset + Loan + ใบสำคัญรับเงิน + Bank Recon + Import Master + โอนเงินระหว่างบัญชี', isSystem:false,
         // 🆕 ADD: receiptVoucher, bankRecon, mdExpense, historicalData, mdImport, transfer
         // 🚫 REMOVE: dashboard, cashPosition
-        menus:['changePassword','weighing','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','trackAssetOverview','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile'],
+        menus:['changePassword','weighing','purchase','sales','stockIssue','paymentApproval','payment','receipt','receiptVoucher','transfer','expense','pettyAdvance','expenseDashboard','bankRecon','ar','ap','bank','stockBalance','stockLedger','transactionLedger','mdCustomer','mdSupplier','mdProduct','mdChannel','mdAccount','mdExpense','mdImport','importTxn','pendingSales','stockPlanning','poOutstanding','poBuy','poSell','tradingDashboard','tradingMatching','salesCommission','reports','plStatement','balanceSheet','cashFlowStatement','production','productionDashboard','productionReport','productionCostReport','yieldLossReport','machineUtil','loanContracts','loanDashboard','trackAssetOverview','assetRegister','depreciation','assetDisposal','equityMaint','openingBalance','historicalData','audit','anomalyDetector','backup','companyProfile','lineNotify'],
         actions:{'*':['view','create','edit','post','export']},
         seeCost:true, seeProfit:true, seeCash:true, seeFinancials:true, seeOpening:true,
         branchScope:'all' },
       { id:'R-WAREHOUSE', name:'คลัง', desc:'คลังสินค้า — Stock, Production, Transfer (เฉพาะสาขาตัวเอง)', isSystem:false,
-        menus:['changePassword','weighing','stockBalance','stockLedger','stockTransfer','pendingSales','stockPlanning','production','productionDashboard','productionReport','machineUtil','mdProduct','mdBranch','gradeAdjustment','stockAdjust','statusConvert','customerReturn','backup','companyProfile'],
+        menus:['changePassword','weighing','stockBalance','stockLedger','stockTransfer','pendingSales','stockPlanning','production','productionDashboard','productionReport','machineUtil','mdProduct','mdBranch','gradeAdjustment','stockAdjust','statusConvert','customerReturn','backup','companyProfile','lineNotify'],
         actions:{'stockTransfer':['view','create','edit','post','export'],'production':['view','create','edit','post','export'],'gradeAdjustment':['view','create','edit','export'],'stockAdjust':['view','create','edit','export'],'*':['view','export']},
         seeCost:false, seeProfit:false, seeCash:false, seeFinancials:false, seeOpening:false,
         branchScope:'own' },
@@ -7150,6 +7177,93 @@ window.$erp = {
       window.$erp.showToast('Share fail: '+e.message, 'error');
     }
   },
+
+  /* ================================================================
+     📱 LINE NOTIFY — V25
+     ส่ง real-time notification เข้ากลุ่ม LINE ผ่าน webhook middleware
+     - user setup: ใส่ webhook URL (n8n / Make / Supabase Edge Function)
+     - middleware รับ POST JSON แล้วต่อยอด LINE Messaging API push
+     - hook ใน save functions: PB, SB, Receipt, Payment, PO Sell, Production ฯลฯ
+     ================================================================ */
+  notify: async function (eventType, payload) {
+    try {
+      const cfg = _GLOBAL_DB.lineNotifyConfig;
+      if (!cfg || !cfg.enabled) return;
+      if (!cfg.webhookUrl) return;
+      const evCfg = (cfg.events||{})[eventType];
+      if (evCfg && evCfg.enabled === false) return;
+      const msg = window.$erp.formatNotifyMessage(eventType, payload);
+      const body = {
+        eventType,
+        eventLabel: evCfg?.label || eventType,
+        message: msg,
+        payload: payload || {},
+        ts: new Date().toISOString(),
+        user: window.$erp.currentUser.value?.username || 'system',
+        branch: window.$erp.currentBranchId.value || '',
+      };
+      // log first (กัน webhook ช้า)
+      if (!Array.isArray(cfg.notifyLog)) cfg.notifyLog = [];
+      const logEntry = { ts: body.ts, event: eventType, label: body.eventLabel, message: msg.slice(0,200), status: 'sending' };
+      cfg.notifyLog.unshift(logEntry);
+      if (cfg.notifyLog.length > 500) cfg.notifyLog.length = 500;
+      // POST (best-effort, no-await pattern OK; แต่ใช้ try/catch)
+      try {
+        const res = await fetch(cfg.webhookUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+          // 5s timeout
+          signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+        });
+        logEntry.status = res.ok ? 'ok' : 'fail';
+        logEntry.code = res.status;
+      } catch(e) {
+        logEntry.status = 'error';
+        logEntry.error = e.message;
+      }
+    } catch (e) { console.warn('[notify]', eventType, e.message); }
+  },
+
+  formatNotifyMessage: function (eventType, p) {
+    p = p || {};
+    const fmt = window.$erp.fmt;
+    const itemsLine = (items) => {
+      if (!Array.isArray(items) || !items.length) return '';
+      const lines = items.slice(0,8).map((it,i) => {
+        const nm = it.productName || window.$erp.productName(it.productId);
+        const w = Number(it.weight||it.netWeight||it.qty||0);
+        const pr = Number(it.unitPrice||it.price||0);
+        const amt = Number(it.netAmount||it.totalAmount||(w*pr));
+        return `  ${i+1}. ${nm} — ${fmt(w)} กก. × ${fmt(pr)} = ${fmt(amt)}`;
+      });
+      if (items.length > 8) lines.push(`  ... และอีก ${items.length-8} รายการ`);
+      return lines.join('\n');
+    };
+    const supName = (id) => window.$erp.supplierName(id);
+    const custName = (id) => window.$erp.customerName(id);
+    const today = window.$erp.today();
+    switch (eventType) {
+      case 'PB_CREATE': return `🛒 บิลซื้อใหม่ ${p.docNo}\n📅 ${p.date||today} · 🏢 ${window.$erp.branchName(p.branchId)}\n👤 ${supName(p.supplierId)}\n${itemsLine(p.items)}\n💰 รวม ${fmt(p.totalAmount||0)} บาท`;
+      case 'PB_UPDATE': return `✏️ แก้บิลซื้อ ${p.docNo}\n👤 ${supName(p.supplierId)} · 💰 ${fmt(p.totalAmount||0)}`;
+      case 'SB_CREATE': return `💰 บิลขายใหม่ / Sales Order ${p.docNo}\n📅 ${p.date||today} · 🏢 ${window.$erp.branchName(p.branchId)}\n👥 ${custName(p.customerId)}\n${itemsLine(p.items)}\n💵 รวม ${fmt(p.totalAmount||0)} บาท`;
+      case 'SB_PACKING': return `📦 Packing List ${p.docNo}\n👥 ${custName(p.customerId)} · 📅 ${p.date||today}\n🚚 ทะเบียน: ${p.licensePlate||'-'}\n${itemsLine(p.items)}\n⚖️ น้ำหนักรวม ${fmt(p.totalWeight||0)} กก.`;
+      case 'RECEIPT_CREATE': return `✅ รับเงินลูกค้า ${p.docNo}\n👥 ${custName(p.customerId)} · 💵 ${fmt(p.amount||0)} บาท\n📎 หักบิล: ${p.billDocNo||'-'}`;
+      case 'PAYMENT_CREATE': return `💸 จ่ายเงิน Supplier ${p.docNo}\n👤 ${supName(p.supplierId)} · 💰 ${fmt(p.amount||0)} บาท\n📎 บิล: ${p.billDocNo||'-'} · 🏦 ${p.paySource||'bank'}`;
+      case 'PO_SELL_CREATE': return `📋 PO ขายใหม่ ${p.docNo}\n👥 ${custName(p.customerId)} · 📦 ${window.$erp.productName(p.productId)}\n⚖️ ${fmt(p.qty||0)} กก. @ ${p.sellPctLme?p.sellPctLme+'%LME':'$'+(p.sellPriceUsdPerKg||0)}\n📅 กำหนดส่ง ${p.deliveryDate||'-'}`;
+      case 'PO_SELL_STATUS': return `🔄 PO ขาย ${p.docNo}: ${p.oldStatus||'-'} → ${p.newStatus}\n👥 ${custName(p.customerId)}`;
+      case 'PO_BUY_CREATE': return `📋 PO ซื้อใหม่ ${p.docNo}\n👤 ${supName(p.supplierId)} · 📦 ${window.$erp.productName(p.productId)}\n⚖️ ${fmt(p.qty||0)} กก.`;
+      case 'PO_BUY_STATUS': return `🔄 PO ซื้อ ${p.docNo}: ${p.oldStatus||'-'} → ${p.newStatus}\n👤 ${supName(p.supplierId)}`;
+      case 'PRODUCTION_INPUT': return `🏭 เบิกวัตถุดิบเข้าผลิต ${p.docNo}\n📦 ${window.$erp.productName(p.productId)} · ⚖️ ${fmt(p.qtyNet||0)} กก.`;
+      case 'PRODUCTION_OUTPUT': return `🏭 บันทึก Output ${p.docNo}\n📦 ${window.$erp.productName(p.productId)} · ⚖️ ${fmt(p.qtyNet||0)} กก.${p.lossQty?' · Loss '+fmt(p.lossQty):''}`;
+      case 'PRODUCTION_STATUS': return `🏭 PO ผลิต ${p.docNo}: ${p.oldStatus||'-'} → ${p.newStatus}`;
+      case 'STOCK_ISSUE': return `📤 เบิก Pending Sale ${p.docNo}\n${itemsLine(p.items)}\n💰 ต้นทุน ${fmt(p.totalCost||0)} · คาดรับ ${fmt(p.totalEstAmount||0)}`;
+      case 'COST_ALLOC_CONFIRM': return `🔗 จับคู่ต้นทุน confirm\n📦 ${window.$erp.productName(p.productId)} · ⚖️ ${fmt(p.qty||0)} กก.\nMatch ID: ${p.matchId||'-'}`;
+      case 'ANOMALY_DETECTED': return `🚨 ตรวจพบความผิดปกติ\n${p.message||p.description||'-'}`;
+      case 'TEST': return `🧪 ทดสอบ LINE Notify\n✅ ระบบทำงานได้ — Webhook + Middleware เชื่อมต่อสำเร็จ\nเวลา: ${new Date().toLocaleString('th-TH')}`;
+      default: return `📢 ${eventType}\n${JSON.stringify(p).slice(0,200)}`;
+    }
+  },
 };
 
 /* ================================================================
@@ -9128,6 +9242,7 @@ const app = createApp({
         {view:'companyProfile', label:'🏢 ข้อมูลบริษัท (สำหรับใบพิมพ์)', icon:'🏢'},
         {view:'changePassword', label:'🔒 เปลี่ยน Password ของฉัน', icon:'🔒'},
         {view:'transactionLedger', label:'📒 Transaction Ledger (เช็คเงินเข้า-ออก)', icon:'📒'},
+        {view:'lineNotify', label:'📱 LINE Notify (แจ้งเข้ากลุ่ม)', icon:'📱'},
         {view:'backup', label:'💾 Backup / Restore (สำคัญ)', icon:'💾'},
         {view:'audit', label:'Audit Log', icon:'🔍'},
         {view:'userPermission', label:'Users & Permissions', icon:'🛡️'},
@@ -14726,6 +14841,8 @@ app.component('view-purchase', {
           }
           db.purchaseBills.push(bill);
         }
+        // 📱 V25: LINE notify
+        try { erp.notify(isEdit?'PB_UPDATE':'PB_CREATE', { docNo:bill.docNo, date:bill.date, branchId:bill.branchId, supplierId:bill.supplierId, items:bill.items, totalAmount:grandTotal }); } catch(e){}
 
         // Stock Ledger — SKIP for TRADING mode (Trading ไม่เข้า Stock)
         // 🛡 ใช้ _safeAddStockLedger() กัน duplicate content-key (refType/refNo/productId/lotNo/qty)
@@ -16567,6 +16684,15 @@ app.component('view-payment', {
           if (window.$autoSync && window.$autoSync.pushNow) await window.$autoSync.pushNow();
         } catch(pushErr) { console.warn('[payment save] push failed:', pushErr); }
         erp.showToast(isEdit?'✓ แก้ไข Payment สำเร็จ':'✓ บันทึก Payment สำเร็จ','success');
+        // 📱 V25: LINE notify
+        try {
+          if (!isEdit) {
+            const totalAmt = (f.lines||[]).reduce((s,l)=>s+num(l.paymentAmount)+num(l.withholdingTax)+num(l.discount),0);
+            const firstBill = (f.lines||[])[0];
+            const billRef = firstBill ? safeArr(db.purchaseBills).find(b=>b && b.id===firstBill.billId) : null;
+            erp.notify('PAYMENT_CREATE', { docNo: f.docNo, supplierId: f.supplierId, amount: totalAmt, billDocNo: billRef?.docNo||'-', paySource: f.method||'bank' });
+          }
+        } catch(e){}
       } catch (e) {
         console.error('save error:', e);
         alert('Save error: ' + e.message);
@@ -17448,6 +17574,15 @@ app.component('view-receipt', {
           if (window.$autoSync && window.$autoSync.pushNow) await window.$autoSync.pushNow();
         } catch(pushErr) { console.warn('[receipt save] push failed:', pushErr); }
         erp.showToast(isEdit?'✓ แก้ไข Receipt สำเร็จ':'✓ บันทึก Receipt สำเร็จ','success');
+        // 📱 V25: LINE notify
+        try {
+          if (!isEdit) {
+            const totalAmt = (f.lines||[]).reduce((s,l)=>s+num(l.receiptAmount),0);
+            const firstBill = (f.lines||[])[0];
+            const billRef = firstBill ? safeArr(db.salesBills).find(b=>b && b.id===firstBill.billId) : null;
+            erp.notify('RECEIPT_CREATE', { docNo: f.docNo, customerId: f.customerId, amount: totalAmt, billDocNo: billRef?.docNo||'-' });
+          }
+        } catch(e){}
       } catch (e) { console.error(e); alert('Save error: '+e.message); }
     }
 
@@ -20174,6 +20309,13 @@ app.component('view-sales', {
         db.salesBills.push(bill);
         erp.logAudit('create','salesBill', null, bill);
       }
+      // 📱 V25: LINE notify — SB_CREATE + auto-send Packing List
+      try {
+        const totalWeight = (bill.items||[]).reduce((s,it)=>s+Number(it.weight||0),0);
+        const payload = { docNo:bill.docNo, date:bill.date, branchId:bill.branchId, customerId:bill.customerId, items:bill.items, totalAmount:bill.totalAmount, totalWeight, licensePlate:bill.licensePlate };
+        if (!editing.value) erp.notify('SB_CREATE', payload);
+        erp.notify('SB_PACKING', payload);  // packing list auto-send
+      } catch(e){}
       // 🆕 Stock Ledger — สร้างเฉพาะ Stock items (Trading items ไม่ตัด Stock)
       // 🛡 ใช้ _safeAddStockLedger() กัน duplicate content-key
       (bill.items||[]).forEach(it => {
@@ -32940,20 +33082,61 @@ app.component('view-supplierTracking', {
   setup() {
     const erp = window.$erp; const db = erp.db;
     const num = _trkNum, safe = _trkSafe, fmt = erp.fmt;
-    const search = ref(''); const year = ref(new Date().getFullYear().toString()); const month = ref(''); const view = ref('list'); const selected = ref(null);
+    const search = ref('');
+    const year = ref(new Date().getFullYear().toString());
+    const month = ref('');
+    const view = ref('list');
+    const selected = ref(null);
+    /* 📷 V25: filter เพิ่ม — productId, metalGroup + yearMode toggle */
+    const filterProductId = ref('');
+    const filterMetalGroup = ref('');
+    const yearMode = ref('amt');   // 'amt' (ยอดซื้อ) | 'qty' (น้ำหนัก)
     function inRange(d) { if (!d) return false; if (year.value && _trkYear(d) !== year.value) return false; if (month.value && _trkMonth(d) !== month.value) return false; return true; }
     /* 🆕 V19 (2026-05-24): ใช้ originalSupplierId ถ้ามี — กันเปลี่ยน supplier ใน bill ทำให้ track เพี้ยน */
     const _effectiveSupplierId = (b) => (b && (b.originalSupplierId || b.supplierId)) || '';
-    function sBills(sid) { return safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === sid && inRange(b.date)); }
+    /* 📷 V25: item-level filter for product + metalGroup */
+    function _itemMatch(it) {
+      if (!it) return false;
+      if (filterProductId.value && it.productId !== filterProductId.value) return false;
+      if (filterMetalGroup.value) {
+        const prod = safe(db.products).find(p => p && p.id === it.productId);
+        if (!prod || (prod.metalGroup || prod.type) !== filterMetalGroup.value) return false;
+      }
+      return true;
+    }
+    function _billHasMatchingItem(b) {
+      if (!filterProductId.value && !filterMetalGroup.value) return true;
+      return safe(b.items).some(_itemMatch);
+    }
+    function sBills(sid) {
+      return safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === sid && inRange(b.date) && _billHasMatchingItem(b));
+    }
     function sPayments(sid) { return safe(db.payments).filter(p => p && p.supplierId === sid && inRange(p.date)); }
     function aggregate(sid) {
       const bills = sBills(sid);
       let qty=0, amt=0, billCount=bills.length, payable=0;
-      bills.forEach(b => { payable += num(b.payableBalance); safe(b.items).forEach(it => { qty += num(it.netWeight); amt += num(it.netAmount); }); });
-      const payments = sPayments(sid);
+      bills.forEach(b => {
+        // ถ้ามี filter → นับเฉพาะ items ที่ match
+        const useFilter = filterProductId.value || filterMetalGroup.value;
+        safe(b.items).forEach(it => {
+          if (useFilter && !_itemMatch(it)) return;
+          qty += num(it.netWeight);
+          amt += num(it.netAmount);
+        });
+        if (!useFilter) payable += num(b.payableBalance);
+      });
+      const payments = useFilterPayment() ? [] : sPayments(sid);
       const paidAmt = payments.reduce((s,p)=>s+num(p.amount),0);
       return { qty, amt, billCount, payable, paidAmt, paymentCount: payments.length, avgBuy: qty>0 ? amt/qty : 0, paidPct: amt>0 ? paidAmt/(paidAmt+payable)*100 : 0 };
     }
+    function useFilterPayment() { return !!(filterProductId.value || filterMetalGroup.value); }
+    /* 📷 V25: metalGroup options + product options for dropdowns */
+    const metalGroupOptions = computed(() => {
+      const set = new Set();
+      safe(db.products).forEach(p => { const g = p.metalGroup || p.type; if (g) set.add(g); });
+      return Array.from(set).sort();
+    });
+    const productOptions = computed(() => safe(db.products).filter(p => p && p.active !== false).sort((a,b) => (a.name||'').localeCompare(b.name||'')));
     const list = computed(() => {
       const q = (search.value||'').toLowerCase();
       return safe(db.suppliers).filter(s => s && s.active).map(s => ({...s, ...aggregate(s.id)}))
@@ -32969,15 +33152,20 @@ app.component('view-supplierTracking', {
 
     const yearCompare = computed(() => {
       const sups = safe(db.suppliers).filter(s => s && s.active);
+      const useFilter = filterProductId.value || filterMetalGroup.value;
       return sups.map(s => {
         const months = Array(12).fill(0).map(() => ({ qty:0, amt:0 }));
-        safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === s.id && _trkYear(b.date) === year.value).forEach(b => {
+        safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _effectiveSupplierId(b) === s.id && _trkYear(b.date) === year.value && _billHasMatchingItem(b)).forEach(b => {
           const mi = parseInt(_trkMonth(b.date)) - 1; if (mi < 0) return;
-          safe(b.items).forEach(it => { months[mi].qty += num(it.netWeight); months[mi].amt += num(it.netAmount); });
+          safe(b.items).forEach(it => {
+            if (useFilter && !_itemMatch(it)) return;
+            months[mi].qty += num(it.netWeight);
+            months[mi].amt += num(it.netAmount);
+          });
         });
         const total = months.reduce((s,m) => ({ qty:s.qty+m.qty, amt:s.amt+m.amt }), {qty:0,amt:0});
         return { ...s, months, total };
-      }).filter(s => s.total.amt > 0).sort((a,b)=>b.total.amt-a.total.amt);
+      }).filter(s => s.total.amt > 0 || s.total.qty > 0).sort((a,b)=> (yearMode.value==='qty'?b.total.qty-a.total.qty:b.total.amt-a.total.amt));
     });
     const yearTotals = computed(() => {
       const totals = Array(12).fill(0).map(() => ({ qty:0, amt:0 }));
@@ -33037,68 +33225,30 @@ app.component('view-supplierTracking', {
       if (!arr.includes(cur)) arr.unshift(cur);
       return arr;
     });
-    return { db, erp, search, year, month, view, selected, list, top10Amt, top10Qty, top10Cheap, top10Expensive, top10Payable, yearCompare, yearTotals, detail, yearOptions, TRACKING_MONTHS, exportCSV, fmt, num };
+    return { db, erp, search, year, month, view, selected, filterProductId, filterMetalGroup, yearMode, metalGroupOptions, productOptions, list, yearCompare, yearTotals, detail, yearOptions, TRACKING_MONTHS, exportCSV, fmt, num };
   },
   template: `
   <div>
     <div v-if="!selected">
       <div class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl p-4 mb-4">
         <h2 class="text-xl font-bold">🏭 Supplier Tracking 360°</h2>
-        <p class="text-sm opacity-80 mt-1">วิเคราะห์ Supplier — ปี/เดือน, Top 10, ตารางรายปี</p>
+        <p class="text-sm opacity-80 mt-1">วิเคราะห์ Supplier — เลือก ปี/เดือน/สินค้า/หมวด · ดูรายปี สลับ น้ำหนัก/ยอดซื้อ</p>
       </div>
-      <div class="bg-white rounded-xl shadow p-3 mb-3 flex flex-wrap gap-3 items-center">
-        <div><label class="block text-xs mb-1">ปี</label><select v-model="year" class="px-2 py-1.5 border rounded text-sm"><option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option></select></div>
-        <div><label class="block text-xs mb-1">เดือน</label><select v-model="month" class="px-2 py-1.5 border rounded text-sm"><option value="">ทั้งปี</option><option v-for="(m,i) in TRACKING_MONTHS" :key="i" :value="String(i+1).padStart(2,'0')">{{m}}</option></select></div>
-        <select v-model="search" class="px-3 py-1.5 border rounded text-sm flex-1 min-w-[200px]">
-          <option value="">— Supplier ทั้งหมด —</option>
-          <option v-for="s in db.suppliers.filter(x=>x && x.active!==false)" :key="s.id" :value="s.name">{{s.code}} · {{s.name}}</option>
-        </select>
+      <div class="bg-white rounded-xl shadow p-3 mb-3 flex flex-wrap gap-3 items-end">
+        <div><label class="block text-xs mb-1 text-slate-600">ปี</label><select v-model="year" class="px-2 py-1.5 border rounded text-sm"><option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">เดือน</label><select v-model="month" class="px-2 py-1.5 border rounded text-sm"><option value="">ทั้งปี</option><option v-for="(m,i) in TRACKING_MONTHS" :key="i" :value="String(i+1).padStart(2,'0')">{{m}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">หมวดสินค้า</label><select v-model="filterMetalGroup" class="px-2 py-1.5 border rounded text-sm"><option value="">ทุกหมวด</option><option v-for="g in metalGroupOptions" :key="g" :value="g">{{g}}</option></select></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs mb-1 text-slate-600">สินค้า</label><select v-model="filterProductId" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทุกสินค้า</option><option v-for="p in productOptions" :key="p.id" :value="p.id">{{p.code}} · {{p.name}}</option></select></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs mb-1 text-slate-600">Supplier</label><select v-model="search" class="w-full px-3 py-1.5 border rounded text-sm"><option value="">— ทั้งหมด —</option><option v-for="s in db.suppliers.filter(x=>x && x.active!==false)" :key="s.id" :value="s.name">{{s.code}} · {{s.name}}</option></select></div>
         <button @click="exportCSV" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
       </div>
-      <!-- 📊 SUMMARY CHARTS -->
-      <div v-if="list.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        <div class="bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 text-white rounded-xl shadow-lg p-4">
-          <div class="text-xs opacity-80">📊 Total Purchase (ทั้งหมด)</div>
-          <div class="text-3xl font-bold">{{fmt(list.reduce((s,c)=>s+c.amt,0))}}</div>
-          <div class="text-xs opacity-90 mt-3 space-y-1">
-            <div>🏭 Supplier ที่ Active: <b>{{list.length}}</b></div>
-            <div>📦 น้ำหนักรวม: <b>{{fmt(list.reduce((s,c)=>s+c.qty,0))}}</b> กก.</div>
-            <div>💸 จ่ายไปแล้ว: <b>{{fmt(list.reduce((s,c)=>s+(c.paidAmt||0),0))}}</b></div>
-            <div>📤 เจ้าหนี้รวม: <b>{{fmt(list.reduce((s,c)=>s+(c.payable||0),0))}}</b></div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-slate-700 mb-3">🏆 Top 5 ยอดซื้อ</div>
-          <div class="space-y-2">
-            <div v-for="(c,i) in top10Amt.slice(0,5)" :key="c.id" class="text-xs">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-4 text-center font-bold" :class="i===0?'text-amber-500':'text-slate-400'">{{i+1}}</span>
-                <span class="flex-1 truncate">{{c.name}}</span>
-                <span class="font-bold text-blue-700">{{fmt(c.amt)}}</span>
-              </div>
-              <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div class="bg-gradient-to-r from-blue-400 to-indigo-500 h-full" :style="{width: ((c.amt / top10Amt[0].amt) * 100) + '%'}"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-slate-700 mb-3">🥧 สัดส่วนการซื้อ Top 5</div>
-          <svg viewBox="0 0 200 200" style="width:160px;height:160px;margin:0 auto;display:block">
-            <template v-for="(c,i) in top10Amt.slice(0,5)" :key="i">
-              <circle cx="100" cy="100" r="70" fill="none"
-                :stroke="['#3b82f6','#6366f1','#8b5cf6','#a855f7','#d946ef'][i]"
-                stroke-width="40"
-                :stroke-dasharray="(c.amt/top10Amt.slice(0,5).reduce((s,x)=>s+x.amt,0)*440)+' 440'"
-                :stroke-dashoffset="-top10Amt.slice(0,i).reduce((s,x)=>s+x.amt/top10Amt.slice(0,5).reduce((tt,xx)=>tt+xx.amt,0)*440,0)"
-                transform="rotate(-90 100 100)" />
-            </template>
-            <text x="100" y="95" text-anchor="middle" font-size="9" fill="#64748b">Total Top 5</text>
-            <text x="100" y="115" text-anchor="middle" font-size="13" font-weight="bold">{{fmt(top10Amt.slice(0,5).reduce((s,x)=>s+x.amt,0))}}</text>
-          </svg>
-        </div>
+      <!-- 📊 V25: Summary KPI ขนาดเล็ก (ลบ Top 5 charts ออก) -->
+      <div v-if="list.length > 0" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">🏭 Supplier Active</div><div class="text-xl font-bold">{{list.length}}</div></div>
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">📦 น้ำหนักรวม (กก.)</div><div class="text-xl font-bold text-purple-700">{{fmt(list.reduce((s,c)=>s+c.qty,0))}}</div></div>
+        <div class="bg-blue-50 rounded-xl shadow p-3"><div class="text-xs text-blue-600">💰 ยอดซื้อรวม</div><div class="text-xl font-bold text-blue-700">{{fmt(list.reduce((s,c)=>s+c.amt,0))}}</div></div>
+        <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">💸 จ่ายแล้ว</div><div class="text-xl font-bold text-emerald-700">{{fmt(list.reduce((s,c)=>s+(c.paidAmt||0),0))}}</div></div>
+        <div class="bg-red-50 rounded-xl shadow p-3"><div class="text-xs text-red-600">📤 เจ้าหนี้คงค้าง</div><div class="text-xl font-bold text-red-700">{{fmt(list.reduce((s,c)=>s+(c.payable||0),0))}}</div></div>
       </div>
 
       <!-- 📈 Monthly Trend Chart (12 months) -->
@@ -33121,54 +33271,7 @@ app.component('view-supplierTracking', {
         </svg>
       </div>
 
-      <!-- 📊 Additional Analysis Charts (เหมือน Product Tracking) -->
-      <div v-if="list.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        <!-- Top 5 Cheapest avg buy -->
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-emerald-700 mb-3">💎 Top 5 ราคาซื้อถูกสุด</div>
-          <div class="space-y-1.5">
-            <div v-for="(s,i) in [...list].filter(x=>x.qty>0 && x.avgBuy>0).sort((a,b)=>a.avgBuy-b.avgBuy).slice(0,5)" :key="s.id" class="text-xs">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-4 text-center font-bold text-emerald-500">{{i+1}}</span>
-                <span class="flex-1 truncate">{{s.name}}</span>
-                <span class="font-bold text-emerald-700">{{fmt(s.avgBuy)}} ฿/กก.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Top 5 Most expensive -->
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-red-700 mb-3">⚠ Top 5 ราคาซื้อแพงสุด</div>
-          <div class="space-y-1.5">
-            <div v-for="(s,i) in [...list].filter(x=>x.qty>0).sort((a,b)=>b.avgBuy-a.avgBuy).slice(0,5)" :key="s.id" class="text-xs">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-4 text-center font-bold text-red-500">{{i+1}}</span>
-                <span class="flex-1 truncate">{{s.name}}</span>
-                <span class="font-bold text-red-700">{{fmt(s.avgBuy)}} ฿/กก.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Top 5 Outstanding Payable -->
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-amber-700 mb-3">📤 Top 5 เจ้าหนี้คงค้าง</div>
-          <div v-if="[...list].filter(x=>x.payable>0).length === 0" class="text-xs text-slate-400">✅ ไม่มีเจ้าหนี้คงค้าง</div>
-          <div v-else class="space-y-1.5">
-            <div v-for="(s,i) in [...list].filter(x=>x.payable>0).sort((a,b)=>b.payable-a.payable).slice(0,5)" :key="s.id" class="text-xs">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-4 text-center font-bold text-amber-500">{{i+1}}</span>
-                <span class="flex-1 truncate">{{s.name}}</span>
-                <span class="font-bold text-amber-700">{{fmt(s.payable)}}</span>
-              </div>
-              <div class="bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                <div class="bg-gradient-to-r from-amber-400 to-orange-500 h-full" :style="{width: ((s.payable / Math.max(1, ...list.map(x=>x.payable))) * 100) + '%'}"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- 📊 V25: Top sections ลบทิ้งหมด -->
 
       <!-- 📊 Payment Status Distribution -->
       <div v-if="list.length > 0" class="bg-white rounded-xl shadow p-4 mb-4">
@@ -33193,10 +33296,14 @@ app.component('view-supplierTracking', {
         </div>
       </div>
 
-      <div class="flex gap-1 mb-3 flex-wrap">
+      <div class="flex gap-1 mb-3 flex-wrap items-center">
         <button @click="view='list'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='list'?'bg-white border-b-2 border-blue-600 text-blue-700':'bg-slate-100']">📋 รายการ</button>
-        <button @click="view='top10'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='top10'?'bg-white border-b-2 border-blue-600 text-blue-700':'bg-slate-100']">🏆 Top 10</button>
         <button @click="view='yearCompare'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='yearCompare'?'bg-white border-b-2 border-blue-600 text-blue-700':'bg-slate-100']">📅 รายปี</button>
+        <!-- 📷 V25: yearMode toggle เฉพาะใน yearCompare -->
+        <div v-if="view==='yearCompare'" class="ml-2 flex border rounded-lg overflow-hidden">
+          <button @click="yearMode='qty'" :class="['px-3 py-1.5 text-xs', yearMode==='qty'?'bg-purple-600 text-white font-bold':'bg-white text-slate-600']">📦 น้ำหนัก</button>
+          <button @click="yearMode='amt'" :class="['px-3 py-1.5 text-xs border-l', yearMode==='amt'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">💰 ยอดซื้อ</button>
+        </div>
       </div>
 
       <div v-if="view==='list'" class="bg-white rounded-xl shadow overflow-x-auto">
@@ -33217,27 +33324,22 @@ app.component('view-supplierTracking', {
         </table>
       </div>
 
-      <div v-if="view==='top10'" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-blue-50">🥇 Top 10 ยอดซื้อสูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Supplier</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ยอดซื้อ</th></tr></thead><tbody><tr v-for="(s,i) in top10Amt" :key="s.id" class="border-t cursor-pointer hover:bg-blue-50/50" @click="selected=s.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{s.name}}</td><td class="p-2 text-right">{{fmt(s.qty)}}</td><td class="p-2 text-right text-blue-700 font-medium">{{fmt(s.amt)}}</td></tr></tbody></table></div>
-        <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-purple-50">⚖️ Top 10 น้ำหนักสูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Supplier</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ราคาเฉลี่ย</th></tr></thead><tbody><tr v-for="(s,i) in top10Qty" :key="s.id" class="border-t cursor-pointer hover:bg-purple-50/50" @click="selected=s.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{s.name}}</td><td class="p-2 text-right text-purple-700 font-bold">{{fmt(s.qty)}}</td><td class="p-2 text-right">{{fmt(s.avgBuy)}}</td></tr></tbody></table></div>
-        <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-emerald-50">💚 Top 10 ราคาถูกที่สุด (ดี)</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Supplier</th><th class="p-2 text-right">ราคาเฉลี่ย</th><th class="p-2 text-right">น้ำหนัก</th></tr></thead><tbody><tr v-for="(s,i) in top10Cheap" :key="s.id" class="border-t cursor-pointer hover:bg-emerald-50/50" @click="selected=s.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{s.name}}</td><td class="p-2 text-right text-emerald-700 font-bold">{{fmt(s.avgBuy)}}</td><td class="p-2 text-right">{{fmt(s.qty)}}</td></tr></tbody></table></div>
-        <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-red-50">⚠️ Top 10 ราคาแพงที่สุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Supplier</th><th class="p-2 text-right">ราคาเฉลี่ย</th><th class="p-2 text-right">น้ำหนัก</th></tr></thead><tbody><tr v-for="(s,i) in top10Expensive" :key="s.id" class="border-t cursor-pointer hover:bg-red-50/50" @click="selected=s.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{s.name}}</td><td class="p-2 text-right text-red-700 font-bold">{{fmt(s.avgBuy)}}</td><td class="p-2 text-right">{{fmt(s.qty)}}</td></tr></tbody></table></div>
-        <div class="bg-white rounded-xl shadow overflow-hidden lg:col-span-2"><h3 class="px-4 py-3 border-b font-semibold bg-amber-50">💳 Top 10 เจ้าหนี้คงค้างสูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Supplier</th><th class="p-2 text-right">เจ้าหนี้</th><th class="p-2 text-right">ยอดซื้อ</th><th class="p-2 text-right">% Paid</th></tr></thead><tbody><tr v-for="s in top10Payable" :key="s.id" class="border-t cursor-pointer hover:bg-amber-50/50" @click="selected=s.id"><td class="p-2">{{s.name}}</td><td class="p-2 text-right text-amber-700 font-bold">{{fmt(s.payable)}}</td><td class="p-2 text-right">{{fmt(s.amt)}}</td><td class="p-2 text-right">{{s.paidPct.toFixed(1)}}%</td></tr><tr v-if="top10Payable.length===0"><td colspan="4" class="text-center py-4 text-emerald-600">✅ ไม่มีเจ้าหนี้</td></tr></tbody></table></div>
-      </div>
-
       <div v-if="view==='yearCompare'" class="bg-white rounded-xl shadow overflow-x-auto">
-        <h3 class="px-4 py-3 border-b font-semibold bg-blue-50">📅 ตารางยอดซื้อรายเดือน ปี {{year}} ({{yearCompare.length}} suppliers)</h3>
+        <h3 class="px-4 py-3 border-b font-semibold bg-blue-50">📅 ตาราง{{yearMode==='qty'?'น้ำหนัก':'ยอดซื้อ'}}รายเดือน ปี {{year}} ({{yearCompare.length}} suppliers)</h3>
         <table class="w-full text-xs">
           <thead class="bg-slate-100"><tr><th class="p-2 text-left sticky left-0 bg-slate-100 z-10">Supplier</th><th v-for="m in TRACKING_MONTHS" :key="m" class="p-2 text-right">{{m}}</th><th class="p-2 text-right bg-blue-100">รวม</th></tr></thead>
           <tbody>
             <tr v-for="s in yearCompare" :key="s.id" class="border-t hover:bg-blue-50/30 cursor-pointer" @click="selected=s.id">
               <td class="p-2 font-medium sticky left-0 bg-white">{{s.name}}</td>
-              <td v-for="(m,i) in s.months" :key="i" class="p-2 text-right" :class="m.amt>0?'text-blue-700':'text-slate-300'">{{m.amt>0?fmt(m.amt):'-'}}</td>
-              <td class="p-2 text-right font-bold bg-blue-50 text-blue-700">{{fmt(s.total.amt)}}</td>
+              <td v-for="(m,i) in s.months" :key="i" class="p-2 text-right"
+                :class="(yearMode==='qty'?m.qty:m.amt)>0?(yearMode==='qty'?'text-purple-700':'text-blue-700'):'text-slate-300'">
+                {{(yearMode==='qty'?m.qty:m.amt)>0?fmt(yearMode==='qty'?m.qty:m.amt):'-'}}
+              </td>
+              <td class="p-2 text-right font-bold bg-blue-50" :class="yearMode==='qty'?'text-purple-700':'text-blue-700'">{{fmt(yearMode==='qty'?s.total.qty:s.total.amt)}}</td>
             </tr>
             <tr v-if="yearCompare.length===0"><td :colspan="14" class="text-center py-8 text-slate-400">ไม่มีข้อมูล</td></tr>
           </tbody>
-          <tfoot v-if="yearCompare.length" class="bg-slate-100 font-bold"><tr><td class="p-2 sticky left-0 bg-slate-100">รวม</td><td v-for="(m,i) in yearTotals.months" :key="i" class="p-2 text-right">{{m.amt>0?fmt(m.amt):'-'}}</td><td class="p-2 text-right text-blue-700 bg-blue-100">{{fmt(yearTotals.grand.amt)}}</td></tr></tfoot>
+          <tfoot v-if="yearCompare.length" class="bg-slate-100 font-bold"><tr><td class="p-2 sticky left-0 bg-slate-100">รวม</td><td v-for="(m,i) in yearTotals.months" :key="i" class="p-2 text-right">{{(yearMode==='qty'?m.qty:m.amt)>0?fmt(yearMode==='qty'?m.qty:m.amt):'-'}}</td><td class="p-2 text-right bg-blue-100" :class="yearMode==='qty'?'text-purple-700':'text-blue-700'">{{fmt(yearMode==='qty'?yearTotals.grand.qty:yearTotals.grand.amt)}}</td></tr></tfoot>
         </table>
       </div>
     </div>
@@ -33315,23 +33417,319 @@ app.component('view-supplierTracking', {
 });
 
 /* =================================================================
-   PRODUCT TRACKING — Year/Month + Top 10 by category + Year Comparison
+   👥 CUSTOMER TRACKING — V25
+   filter สินค้า/หมวด/เดือน · รายปี toggle น้ำหนัก ↔ ยอดขาย · ไม่มี Top 10
+   ================================================================= */
+app.component('view-customerTracking', {
+  setup() {
+    const erp = window.$erp; const db = erp.db;
+    const num = _trkNum, safe = _trkSafe, fmt = erp.fmt;
+    const search = ref('');
+    const year = ref(new Date().getFullYear().toString());
+    const month = ref('');
+    const view = ref('list');
+    const selected = ref(null);
+    const filterProductId = ref('');
+    const filterMetalGroup = ref('');
+    const yearMode = ref('amt');   // 'amt' (ยอดขาย) | 'qty' (น้ำหนัก)
+    function inRange(d) { if (!d) return false; if (year.value && _trkYear(d) !== year.value) return false; if (month.value && _trkMonth(d) !== month.value) return false; return true; }
+    function _itemMatch(it) {
+      if (!it) return false;
+      if (filterProductId.value && it.productId !== filterProductId.value) return false;
+      if (filterMetalGroup.value) {
+        const prod = safe(db.products).find(p => p && p.id === it.productId);
+        if (!prod || (prod.metalGroup || prod.type) !== filterMetalGroup.value) return false;
+      }
+      return true;
+    }
+    function _billHasMatchingItem(b) {
+      if (!filterProductId.value && !filterMetalGroup.value) return true;
+      return safe(b.items).some(_itemMatch);
+    }
+    function cBills(cid) { return safe(db.salesBills).filter(b => b && b.status !== 'cancelled' && b.customerId === cid && inRange(b.date) && _billHasMatchingItem(b)); }
+    function cReceipts(cid) { return safe(db.receipts).filter(r => r && r.customerId === cid && inRange(r.date)); }
+    function aggregate(cid) {
+      const bills = cBills(cid);
+      let qty=0, amt=0, cogs=0, gp=0, billCount=bills.length, receivable=0;
+      const useFilter = filterProductId.value || filterMetalGroup.value;
+      bills.forEach(b => {
+        safe(b.items).forEach(it => {
+          if (useFilter && !_itemMatch(it)) return;
+          qty += num(it.weight);
+          amt += num(it.netAmount);
+          cogs += num(it.totalCost);
+          gp += num(it.profit);
+        });
+        if (!useFilter) receivable += num(b.receivableBalance);
+      });
+      const receipts = useFilter ? [] : cReceipts(cid);
+      const receivedAmt = receipts.reduce((s,r)=>s+num(r.amount),0);
+      return { qty, amt, cogs, gp, billCount, receivable, receivedAmt, receiptCount: receipts.length,
+        avgSell: qty>0 ? amt/qty : 0, gpPct: amt>0 ? gp/amt*100 : 0,
+        receivedPct: amt>0 ? receivedAmt/(receivedAmt+receivable)*100 : 0 };
+    }
+    const metalGroupOptions = computed(() => {
+      const set = new Set();
+      safe(db.products).forEach(p => { const g = p && (p.metalGroup || p.type); if (g) set.add(g); });
+      return Array.from(set).sort();
+    });
+    const productOptions = computed(() => safe(db.products).filter(p => p && p.active !== false).sort((a,b)=>(a.name||'').localeCompare(b.name||'')));
+    const list = computed(() => {
+      const q = (search.value||'').toLowerCase();
+      return safe(db.customers).filter(c => c && c.active).map(c => ({...c, ...aggregate(c.id)}))
+        .filter(c => c.billCount > 0 || c.qty > 0)
+        .filter(c => !q || ((c.name||'')+(c.code||'')).toLowerCase().includes(q))
+        .sort((a,b)=>b.amt-a.amt);
+    });
+    const yearCompare = computed(() => {
+      const cus = safe(db.customers).filter(c => c && c.active);
+      const useFilter = filterProductId.value || filterMetalGroup.value;
+      return cus.map(c => {
+        const months = Array(12).fill(0).map(() => ({ qty:0, amt:0 }));
+        safe(db.salesBills).filter(b => b && b.status !== 'cancelled' && b.customerId === c.id && _trkYear(b.date) === year.value && _billHasMatchingItem(b)).forEach(b => {
+          const mi = parseInt(_trkMonth(b.date)) - 1; if (mi < 0) return;
+          safe(b.items).forEach(it => {
+            if (useFilter && !_itemMatch(it)) return;
+            months[mi].qty += num(it.weight);
+            months[mi].amt += num(it.netAmount);
+          });
+        });
+        const total = months.reduce((s,m) => ({ qty:s.qty+m.qty, amt:s.amt+m.amt }), {qty:0,amt:0});
+        return { ...c, months, total };
+      }).filter(c => c.total.amt > 0 || c.total.qty > 0).sort((a,b)=> (yearMode.value==='qty'?b.total.qty-a.total.qty:b.total.amt-a.total.amt));
+    });
+    const yearTotals = computed(() => {
+      const totals = Array(12).fill(0).map(() => ({ qty:0, amt:0 }));
+      yearCompare.value.forEach(c => c.months.forEach((m,i) => { totals[i].qty += m.qty; totals[i].amt += m.amt; }));
+      const grand = totals.reduce((s,m) => ({ qty:s.qty+m.qty, amt:s.amt+m.amt }), {qty:0,amt:0});
+      return { months: totals, grand };
+    });
+    const detail = computed(() => {
+      if (!selected.value) return null;
+      const c = safe(db.customers).find(x => x && x.id === selected.value);
+      if (!c) return null;
+      const bills = cBills(c.id), receipts = cReceipts(c.id), a = aggregate(c.id);
+      const byProd = {};
+      bills.forEach(b => safe(b.items).forEach(it => {
+        const k = it.productId; if (!byProd[k]) byProd[k] = { productId:k, qty:0, amt:0, cogs:0, gp:0 };
+        byProd[k].qty += num(it.weight); byProd[k].amt += num(it.netAmount);
+        byProd[k].cogs += num(it.totalCost); byProd[k].gp += num(it.profit);
+      }));
+      const productBreakdown = Object.values(byProd).map(p => {
+        const prod = safe(db.products).find(x=>x.id===p.productId)||{};
+        return {...p, name:prod.name||'-', code:prod.code||'-', avgSell:p.qty>0?p.amt/p.qty:0, gpPct:p.amt>0?p.gp/p.amt*100:0};
+      }).sort((a,b)=>b.amt-a.amt);
+      const monthlyAll = Array(12).fill(0).map(() => ({ qty:0, amt:0, gp:0, receivedAmt:0, billCount:0 }));
+      safe(db.salesBills).filter(b => b && b.status !== 'cancelled' && b.customerId === c.id && _trkYear(b.date) === year.value).forEach(b => {
+        const mi = parseInt(_trkMonth(b.date))-1; if (mi < 0) return;
+        monthlyAll[mi].billCount++;
+        safe(b.items).forEach(it => { monthlyAll[mi].qty += num(it.weight); monthlyAll[mi].amt += num(it.netAmount); monthlyAll[mi].gp += num(it.profit); });
+      });
+      safe(db.receipts).filter(r => r && r.customerId === c.id && _trkYear(r.date) === year.value).forEach(r => {
+        const mi = parseInt(_trkMonth(r.date))-1; if (mi >= 0) monthlyAll[mi].receivedAmt += num(r.amount);
+      });
+      return { customer:c, ...a, bills, receipts, productBreakdown, monthlyAll };
+    });
+    function exportCSV() {
+      let rows;
+      if (selected.value) {
+        const d = detail.value;
+        rows = [['Bill','Date','Total','Received','Receivable','Status']];
+        d.bills.forEach(b => rows.push([b.docNo, b.date, num(b.totalAmount), num(b.receivedAmount), num(b.receivableBalance), b.status]));
+        downloadCsv('customer_'+d.customer.name+'_'+year.value+'.csv', rows);
+      } else if (view.value === 'yearCompare') {
+        rows = [['Customer', ...TRACKING_MONTHS, 'Total Qty', 'Total Amt']];
+        yearCompare.value.forEach(c => rows.push([c.name, ...c.months.map(m => m.amt), c.total.qty, c.total.amt]));
+        downloadCsv('customer_year_'+year.value+'.csv', rows);
+      } else {
+        rows = [['Code','Customer','Bills','Qty','SellAmt','AvgSell','GP','GP%','Received','Receivable','%Received']];
+        list.value.forEach(c => rows.push([c.code, c.name, c.billCount, c.qty, c.amt, c.avgSell.toFixed(2), c.gp, c.gpPct.toFixed(2), c.receivedAmt, c.receivable, c.receivedPct.toFixed(2)]));
+        downloadCsv('customer_tracking_'+year.value+'.csv', rows);
+      }
+    }
+    const yearOptions = computed(() => {
+      const set = new Set();
+      safe(db.salesBills).forEach(b => { if (b && b.date) set.add(_trkYear(b.date)); });
+      const arr = Array.from(set).sort().reverse();
+      const cur = new Date().getFullYear().toString();
+      if (!arr.includes(cur)) arr.unshift(cur);
+      return arr;
+    });
+    return { db, erp, search, year, month, view, selected, filterProductId, filterMetalGroup, yearMode, metalGroupOptions, productOptions,
+      list, yearCompare, yearTotals, detail, yearOptions, TRACKING_MONTHS, exportCSV, fmt, num };
+  },
+  template: `
+  <div>
+    <div v-if="!selected">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-xl p-4 mb-4">
+        <h2 class="text-xl font-bold">👥 Customer Tracking 360°</h2>
+        <p class="text-sm opacity-80 mt-1">วิเคราะห์ลูกค้า — เลือก ปี/เดือน/สินค้า/หมวด · รายปี สลับ น้ำหนัก/ยอดขาย</p>
+      </div>
+      <div class="bg-white rounded-xl shadow p-3 mb-3 flex flex-wrap gap-3 items-end">
+        <div><label class="block text-xs mb-1 text-slate-600">ปี</label><select v-model="year" class="px-2 py-1.5 border rounded text-sm"><option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">เดือน</label><select v-model="month" class="px-2 py-1.5 border rounded text-sm"><option value="">ทั้งปี</option><option v-for="(m,i) in TRACKING_MONTHS" :key="i" :value="String(i+1).padStart(2,'0')">{{m}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">หมวดสินค้า</label><select v-model="filterMetalGroup" class="px-2 py-1.5 border rounded text-sm"><option value="">ทุกหมวด</option><option v-for="g in metalGroupOptions" :key="g" :value="g">{{g}}</option></select></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs mb-1 text-slate-600">สินค้า</label><select v-model="filterProductId" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทุกสินค้า</option><option v-for="p in productOptions" :key="p.id" :value="p.id">{{p.code}} · {{p.name}}</option></select></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs mb-1 text-slate-600">Customer</label><select v-model="search" class="w-full px-3 py-1.5 border rounded text-sm"><option value="">— ทั้งหมด —</option><option v-for="c in db.customers.filter(x=>x && x.active!==false)" :key="c.id" :value="c.name">{{c.code}} · {{c.name}}</option></select></div>
+        <button @click="exportCSV" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
+      </div>
+
+      <div v-if="list.length > 0" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">👥 Customer Active</div><div class="text-xl font-bold">{{list.length}}</div></div>
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">📦 น้ำหนักรวม (กก.)</div><div class="text-xl font-bold text-purple-700">{{fmt(list.reduce((s,c)=>s+c.qty,0))}}</div></div>
+        <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">💰 ยอดขายรวม</div><div class="text-xl font-bold text-emerald-700">{{fmt(list.reduce((s,c)=>s+c.amt,0))}}</div></div>
+        <div class="bg-blue-50 rounded-xl shadow p-3"><div class="text-xs text-blue-600">✅ รับเงินแล้ว</div><div class="text-xl font-bold text-blue-700">{{fmt(list.reduce((s,c)=>s+(c.receivedAmt||0),0))}}</div></div>
+        <div class="bg-amber-50 rounded-xl shadow p-3"><div class="text-xs text-amber-600">📥 ลูกหนี้คงค้าง</div><div class="text-xl font-bold text-amber-700">{{fmt(list.reduce((s,c)=>s+(c.receivable||0),0))}}</div></div>
+      </div>
+
+      <div class="flex gap-1 mb-3 flex-wrap items-center">
+        <button @click="view='list'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='list'?'bg-white border-b-2 border-emerald-600 text-emerald-700':'bg-slate-100']">📋 รายการ</button>
+        <button @click="view='yearCompare'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='yearCompare'?'bg-white border-b-2 border-emerald-600 text-emerald-700':'bg-slate-100']">📅 รายปี</button>
+        <div v-if="view==='yearCompare'" class="ml-2 flex border rounded-lg overflow-hidden">
+          <button @click="yearMode='qty'" :class="['px-3 py-1.5 text-xs', yearMode==='qty'?'bg-purple-600 text-white font-bold':'bg-white text-slate-600']">📦 น้ำหนัก</button>
+          <button @click="yearMode='amt'" :class="['px-3 py-1.5 text-xs border-l', yearMode==='amt'?'bg-emerald-600 text-white font-bold':'bg-white text-slate-600']">💰 ยอดขาย</button>
+        </div>
+      </div>
+
+      <div v-if="view==='list'" class="bg-white rounded-xl shadow overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100"><tr><th class="p-2 text-left">Code</th><th class="p-2 text-left">Customer</th><th class="p-2 text-right">บิล</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ยอดขาย</th><th class="p-2 text-right">ขายเฉลี่ย</th><th class="p-2 text-right">GP</th><th class="p-2 text-right">GP%</th><th class="p-2 text-right">รับแล้ว</th><th class="p-2 text-right">ลูกหนี้</th><th class="p-2 text-right">% Received</th></tr></thead>
+          <tbody>
+            <tr v-for="c in list" :key="c.id" class="border-t hover:bg-emerald-50/50 cursor-pointer" @click="selected = c.id">
+              <td class="p-2 font-mono">{{c.code}}</td><td class="p-2 font-medium">{{c.name}}</td>
+              <td class="p-2 text-right">{{c.billCount}}</td><td class="p-2 text-right">{{fmt(c.qty)}}</td>
+              <td class="p-2 text-right text-emerald-700 font-medium">{{fmt(c.amt)}}</td>
+              <td class="p-2 text-right">{{fmt(c.avgSell)}}</td>
+              <td class="p-2 text-right font-bold" :class="c.gp>=0?'text-emerald-700':'text-red-600'">{{fmt(c.gp)}}</td>
+              <td class="p-2 text-right" :class="c.gpPct<0?'text-red-700':c.gpPct<5?'text-amber-700':'text-emerald-700'">{{c.gpPct.toFixed(2)}}%</td>
+              <td class="p-2 text-right text-blue-700">{{fmt(c.receivedAmt)}}</td>
+              <td class="p-2 text-right text-amber-700">{{fmt(c.receivable)}}</td>
+              <td class="p-2 text-right">{{c.receivedPct.toFixed(1)}}%</td>
+            </tr>
+            <tr v-if="list.length===0"><td colspan="11" class="text-center py-8 text-slate-400">ไม่มีข้อมูล</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="view==='yearCompare'" class="bg-white rounded-xl shadow overflow-x-auto">
+        <h3 class="px-4 py-3 border-b font-semibold bg-emerald-50">📅 ตาราง{{yearMode==='qty'?'น้ำหนัก':'ยอดขาย'}}รายเดือน ปี {{year}} ({{yearCompare.length}} customers)</h3>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100"><tr><th class="p-2 text-left sticky left-0 bg-slate-100 z-10">Customer</th><th v-for="m in TRACKING_MONTHS" :key="m" class="p-2 text-right">{{m}}</th><th class="p-2 text-right bg-emerald-100">รวม</th></tr></thead>
+          <tbody>
+            <tr v-for="c in yearCompare" :key="c.id" class="border-t hover:bg-emerald-50/30 cursor-pointer" @click="selected=c.id">
+              <td class="p-2 font-medium sticky left-0 bg-white">{{c.name}}</td>
+              <td v-for="(m,i) in c.months" :key="i" class="p-2 text-right"
+                :class="(yearMode==='qty'?m.qty:m.amt)>0?(yearMode==='qty'?'text-purple-700':'text-emerald-700'):'text-slate-300'">
+                {{(yearMode==='qty'?m.qty:m.amt)>0?fmt(yearMode==='qty'?m.qty:m.amt):'-'}}
+              </td>
+              <td class="p-2 text-right font-bold bg-emerald-50" :class="yearMode==='qty'?'text-purple-700':'text-emerald-700'">{{fmt(yearMode==='qty'?c.total.qty:c.total.amt)}}</td>
+            </tr>
+            <tr v-if="yearCompare.length===0"><td :colspan="14" class="text-center py-8 text-slate-400">ไม่มีข้อมูล</td></tr>
+          </tbody>
+          <tfoot v-if="yearCompare.length" class="bg-slate-100 font-bold"><tr><td class="p-2 sticky left-0 bg-slate-100">รวม</td><td v-for="(m,i) in yearTotals.months" :key="i" class="p-2 text-right">{{(yearMode==='qty'?m.qty:m.amt)>0?fmt(yearMode==='qty'?m.qty:m.amt):'-'}}</td><td class="p-2 text-right bg-emerald-100" :class="yearMode==='qty'?'text-purple-700':'text-emerald-700'">{{fmt(yearMode==='qty'?yearTotals.grand.qty:yearTotals.grand.amt)}}</td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <div v-else-if="detail">
+      <div class="flex items-center gap-3 mb-4 flex-wrap">
+        <button @click="selected = null" class="bg-slate-200 hover:bg-slate-300 px-3 py-2 rounded text-sm">← กลับ</button>
+        <h2 class="text-xl font-bold">👥 {{detail.customer.name}}</h2>
+        <span class="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">ปี {{year}}{{month?' / '+TRACKING_MONTHS[parseInt(month)-1]:''}}</span>
+        <button @click="exportCSV" class="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">บิล</div><div class="text-lg font-bold">{{detail.billCount}}</div></div>
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">น้ำหนัก</div><div class="text-lg font-bold">{{fmt(detail.qty)}}</div></div>
+        <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">ยอดขาย</div><div class="text-lg font-bold text-emerald-700">{{fmt(detail.amt)}}</div></div>
+        <div class="bg-purple-50 rounded-xl shadow p-3"><div class="text-xs text-purple-600">GP</div><div class="text-lg font-bold text-purple-700">{{fmt(detail.gp)}}</div><div class="text-xs">{{detail.gpPct.toFixed(2)}}%</div></div>
+        <div class="bg-blue-50 rounded-xl shadow p-3"><div class="text-xs text-blue-600">รับแล้ว</div><div class="text-lg font-bold text-blue-700">{{fmt(detail.receivedAmt)}}</div></div>
+        <div class="bg-amber-50 rounded-xl shadow p-3"><div class="text-xs text-amber-600">ลูกหนี้</div><div class="text-lg font-bold text-amber-700">{{fmt(detail.receivable)}}</div></div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow overflow-hidden mb-4">
+        <h3 class="px-4 py-3 border-b font-semibold bg-emerald-50">📅 รายเดือนปี {{year}}</h3>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100"><tr><th class="p-2 text-left">เดือน</th><th class="p-2 text-right">บิล</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ยอดขาย</th><th class="p-2 text-right">GP</th><th class="p-2 text-right">รับเงิน</th></tr></thead>
+          <tbody><tr v-for="(m,i) in detail.monthlyAll" :key="i" class="border-t" :class="m.amt>0?'':'opacity-40'">
+            <td class="p-2 font-medium">{{TRACKING_MONTHS[i]}}</td>
+            <td class="p-2 text-right">{{m.billCount||'-'}}</td>
+            <td class="p-2 text-right">{{m.qty?fmt(m.qty):'-'}}</td>
+            <td class="p-2 text-right text-emerald-700">{{m.amt?fmt(m.amt):'-'}}</td>
+            <td class="p-2 text-right" :class="m.gp>=0?'text-emerald-700':'text-red-600'">{{m.gp?fmt(m.gp):'-'}}</td>
+            <td class="p-2 text-right text-blue-700">{{m.receivedAmt?fmt(m.receivedAmt):'-'}}</td>
+          </tr></tbody>
+        </table>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <h3 class="px-4 py-3 border-b font-semibold bg-emerald-50">📤 บิลขาย ({{detail.bills.length}})</h3>
+          <div class="overflow-x-auto max-h-96"><table class="w-full text-xs">
+            <thead class="bg-slate-100 sticky top-0"><tr><th class="p-2 text-left">เลขที่</th><th class="p-2 text-left">วันที่</th><th class="p-2 text-right">ยอด</th><th class="p-2 text-right">รับแล้ว</th><th class="p-2 text-right">ค้าง</th></tr></thead>
+            <tbody><tr v-for="b in detail.bills" :key="b.id" class="border-t">
+              <td class="p-2 font-mono text-blue-600">{{b.docNo}}</td><td class="p-2">{{b.date}}</td>
+              <td class="p-2 text-right">{{fmt(b.totalAmount)}}</td>
+              <td class="p-2 text-right text-blue-700">{{fmt(b.receivedAmount)}}</td>
+              <td class="p-2 text-right text-amber-600">{{fmt(b.receivableBalance)}}</td>
+            </tr><tr v-if="!detail.bills.length"><td colspan="5" class="text-center py-4 text-slate-400">ไม่มี</td></tr></tbody>
+          </table></div>
+        </div>
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <h3 class="px-4 py-3 border-b font-semibold bg-blue-50">✅ รับเงิน ({{detail.receipts.length}})</h3>
+          <div class="overflow-x-auto max-h-96"><table class="w-full text-xs">
+            <thead class="bg-slate-100 sticky top-0"><tr><th class="p-2 text-left">เลขที่</th><th class="p-2 text-left">วันที่</th><th class="p-2 text-left">บัญชี</th><th class="p-2 text-right">จำนวน</th></tr></thead>
+            <tbody><tr v-for="r in detail.receipts" :key="r.id" class="border-t">
+              <td class="p-2 font-mono text-blue-600">{{r.docNo}}</td><td class="p-2">{{r.date}}</td>
+              <td class="p-2 text-xs">{{erp.accountName(r.accountId)}}</td>
+              <td class="p-2 text-right text-emerald-700 font-medium">{{fmt(r.amount)}}</td>
+            </tr><tr v-if="!detail.receipts.length"><td colspan="4" class="text-center py-4 text-slate-400">ไม่มี</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow overflow-hidden">
+        <h3 class="px-4 py-3 border-b font-semibold bg-purple-50">📦 สินค้าที่ขาย ({{detail.productBreakdown.length}})</h3>
+        <div class="overflow-x-auto"><table class="w-full text-xs">
+          <thead class="bg-slate-100"><tr><th class="p-2 text-left">Code</th><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ยอดขาย</th><th class="p-2 text-right">เฉลี่ย</th><th class="p-2 text-right">GP</th><th class="p-2 text-right">GP%</th></tr></thead>
+          <tbody><tr v-for="p in detail.productBreakdown" :key="p.productId" class="border-t">
+            <td class="p-2 font-mono">{{p.code}}</td><td class="p-2">{{p.name}}</td>
+            <td class="p-2 text-right">{{fmt(p.qty)}}</td>
+            <td class="p-2 text-right text-emerald-700">{{fmt(p.amt)}}</td>
+            <td class="p-2 text-right">{{fmt(p.avgSell)}}</td>
+            <td class="p-2 text-right" :class="p.gp>=0?'text-emerald-700':'text-red-600'">{{fmt(p.gp)}}</td>
+            <td class="p-2 text-right">{{p.gpPct.toFixed(2)}}%</td>
+          </tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>`
+});
+
+/* =================================================================
+   PRODUCT TRACKING — Year/Month + Filter หมวด/Supplier/Customer + Year Comparison (น้ำหนัก/ยอดซื้อ/ยอดขาย)
    ================================================================= */
 app.component('view-productTracking', {
   setup() {
     const erp = window.$erp; const db = erp.db;
     const num = _trkNum, safe = _trkSafe, fmt = erp.fmt;
     const search = ref(''); const filterMetalGroup = ref('');
+    /* 📷 V25: filter เพิ่ม supplier + customer + yearMode 3 ตัวเลือก */
+    const filterSupplierId = ref('');
+    const filterCustomerId = ref('');
+    const yearMode = ref('sellRev');  // 'qty' (น้ำหนัก-ใช้ buyQty+sellQty) | 'buyAmt' (ยอดซื้อ) | 'sellRev' (ยอดขาย)
     const year = ref(new Date().getFullYear().toString()); const month = ref(''); const view = ref('list'); const selected = ref(null);
     function inRange(d) { if (!d) return false; if (year.value && _trkYear(d) !== year.value) return false; if (month.value && _trkMonth(d) !== month.value) return false; return true; }
     function aggregate(pid) {
       let buyQty=0, buyAmt=0, sellQty=0, sellRev=0, cogs=0, gp=0, buyBills=0, sellBills=0;
       const bsupSet = new Set(), bcusSet = new Set();
       safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && inRange(b.date)).forEach(b => {
+        if (filterSupplierId.value && (b.originalSupplierId || b.supplierId) !== filterSupplierId.value) return;
         let any=false; safe(b.items).forEach(it => { if (it.productId !== pid) return; buyQty += num(it.netWeight); buyAmt += num(it.netAmount); any=true; });
         if (any) { buyBills++; bsupSet.add(b.supplierId); }
       });
       safe(db.salesBills).filter(b => b && b.status !== 'cancelled' && inRange(b.date)).forEach(b => {
+        if (filterCustomerId.value && b.customerId !== filterCustomerId.value) return;
         let any=false; safe(b.items).forEach(it => { if (it.productId !== pid) return; sellQty += num(it.weight); sellRev += num(it.netAmount); cogs += num(it.totalCost); gp += num(it.profit); any=true; });
         if (any) { sellBills++; bcusSet.add(b.customerId); }
       });
@@ -33344,39 +33742,45 @@ app.component('view-productTracking', {
     }
     const allMetalGroups = computed(() => {
       const set = new Set();
-      safe(db.products).forEach(p => { if (p && p.metalGroup) set.add(p.metalGroup); });
+      safe(db.products).forEach(p => { const g = p && (p.metalGroup || p.type); if (g) set.add(g); });
       return Array.from(set).sort();
     });
     const list = computed(() => {
       const q = (search.value||'').toLowerCase();
       return safe(db.products).filter(p => p && p.active).map(p => ({...p, ...aggregate(p.id)}))
         .filter(p => {
-          if (filterMetalGroup.value && p.metalGroup !== filterMetalGroup.value) return false;
+          const g = p.metalGroup || p.type;
+          if (filterMetalGroup.value && g !== filterMetalGroup.value) return false;
           if (q && !((p.name||'')+(p.code||'')).toLowerCase().includes(q)) return false;
           return p.buyQty > 0 || p.sellQty > 0 || p.stockQty > 0;
         }).sort((a,b)=>b.sellRev-a.sellRev);
     });
-    const top10BySales = computed(() => list.value.slice(0, 10));
-    const top10ByGP = computed(() => [...list.value].sort((a,b)=>b.gp-a.gp).slice(0, 10));
-    const top10ByGPPct = computed(() => list.value.filter(p=>p.sellRev>0).sort((a,b)=>b.gpPct-a.gpPct).slice(0, 10));
-    const top10ByBuy = computed(() => [...list.value].sort((a,b)=>b.buyAmt-a.buyAmt).slice(0, 10));
-    const slowMovers = computed(() => list.value.filter(p => p.stockQty > 0 && p.sellQty < p.stockQty * 0.5).sort((a,b)=>b.stockValue-a.stockValue).slice(0, 10));
 
     const yearCompare = computed(() => {
-      const products = safe(db.products).filter(p => p && p.active && (!filterMetalGroup.value || p.metalGroup === filterMetalGroup.value));
+      const products = safe(db.products).filter(p => p && p.active && (!filterMetalGroup.value || (p.metalGroup || p.type) === filterMetalGroup.value));
       return products.map(p => {
         const months = Array(12).fill(0).map(() => ({ buyQty:0, buyAmt:0, sellQty:0, sellRev:0, gp:0 }));
         safe(db.purchaseBills).filter(b => b && b.status !== 'cancelled' && _trkYear(b.date) === year.value).forEach(b => {
+          if (filterSupplierId.value && (b.originalSupplierId || b.supplierId) !== filterSupplierId.value) return;
           const mi = parseInt(_trkMonth(b.date)) - 1; if (mi < 0) return;
           safe(b.items).forEach(it => { if (it.productId !== p.id) return; months[mi].buyQty += num(it.netWeight); months[mi].buyAmt += num(it.netAmount); });
         });
         safe(db.salesBills).filter(b => b && b.status !== 'cancelled' && _trkYear(b.date) === year.value).forEach(b => {
+          if (filterCustomerId.value && b.customerId !== filterCustomerId.value) return;
           const mi = parseInt(_trkMonth(b.date)) - 1; if (mi < 0) return;
           safe(b.items).forEach(it => { if (it.productId !== p.id) return; months[mi].sellQty += num(it.weight); months[mi].sellRev += num(it.netAmount); months[mi].gp += num(it.profit); });
         });
         const total = months.reduce((s,m) => ({ buyQty:s.buyQty+m.buyQty, buyAmt:s.buyAmt+m.buyAmt, sellQty:s.sellQty+m.sellQty, sellRev:s.sellRev+m.sellRev, gp:s.gp+m.gp }), {buyQty:0,buyAmt:0,sellQty:0,sellRev:0,gp:0});
+        // qtyTotal = buyQty + sellQty สำหรับโหมด "น้ำหนัก"
+        months.forEach(m => { m.qtyTotal = m.buyQty + m.sellQty; });
+        total.qtyTotal = total.buyQty + total.sellQty;
         return { ...p, months, total };
-      }).filter(p => p.total.sellRev > 0 || p.total.buyAmt > 0).sort((a,b)=>b.total.sellRev-a.total.sellRev);
+      }).filter(p => p.total.sellRev > 0 || p.total.buyAmt > 0).sort((a,b)=>{
+        const k = yearMode.value;
+        if (k==='qty') return b.total.qtyTotal - a.total.qtyTotal;
+        if (k==='buyAmt') return b.total.buyAmt - a.total.buyAmt;
+        return b.total.sellRev - a.total.sellRev;
+      });
     });
 
     const detail = computed(() => {
@@ -33421,75 +33825,42 @@ app.component('view-productTracking', {
       if (!arr.includes(cur)) arr.unshift(cur);
       return arr;
     });
-    return { db, erp, search, filterMetalGroup, year, month, view, selected, list, top10BySales, top10ByGP, top10ByGPPct, top10ByBuy, slowMovers, yearCompare, detail, allMetalGroups, yearOptions, TRACKING_MONTHS, exportCSV, fmt, num };
+    return { db, erp, search, filterMetalGroup, filterSupplierId, filterCustomerId, yearMode, year, month, view, selected, list, yearCompare, detail, allMetalGroups, yearOptions, TRACKING_MONTHS, exportCSV, fmt, num };
   },
   template: `
   <div>
     <div v-if="!selected">
       <div class="bg-gradient-to-r from-amber-600 to-orange-700 text-white rounded-xl p-4 mb-4">
         <h2 class="text-xl font-bold">📦 Product Tracking 360°</h2>
-        <p class="text-sm opacity-80 mt-1">วิเคราะห์สินค้า — แยกหมวด, Top 10, ตารางรายปี, Stock Movement</p>
+        <p class="text-sm opacity-80 mt-1">วิเคราะห์สินค้า — เลือกหมวด/Supplier/Customer/เดือน · รายปี สลับ น้ำหนัก/ยอดซื้อ/ยอดขาย</p>
       </div>
-      <div class="bg-white rounded-xl shadow p-3 mb-3 flex flex-wrap gap-3 items-center">
-        <div><label class="block text-xs mb-1">ปี</label><select v-model="year" class="px-2 py-1.5 border rounded text-sm"><option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option></select></div>
-        <div><label class="block text-xs mb-1">เดือน</label><select v-model="month" class="px-2 py-1.5 border rounded text-sm"><option value="">ทั้งปี</option><option v-for="(m,i) in TRACKING_MONTHS" :key="i" :value="String(i+1).padStart(2,'0')">{{m}}</option></select></div>
-        <div><label class="block text-xs mb-1">หมวดสินค้า</label><select v-model="filterMetalGroup" class="px-2 py-1.5 border rounded text-sm"><option value="">ทุกหมวด</option><option v-for="g in allMetalGroups" :key="g" :value="g">{{g}}</option></select></div>
-        <select v-model="search" class="px-3 py-1.5 border rounded text-sm flex-1 min-w-[200px]">
-          <option value="">— สินค้าทั้งหมด —</option>
-          <option v-for="p in db.products.filter(x=>x && x.active!==false)" :key="p.id" :value="p.name">{{p.code}} · {{p.name}} {{p.metalGroup?'· '+p.metalGroup:''}}</option>
-        </select>
-        <button @click="exportCSV" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button>
+      <div class="bg-white rounded-xl shadow p-3 mb-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+        <div><label class="block text-xs mb-1 text-slate-600">ปี</label><select v-model="year" class="w-full px-2 py-1.5 border rounded text-sm"><option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">เดือน</label><select v-model="month" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทั้งปี</option><option v-for="(m,i) in TRACKING_MONTHS" :key="i" :value="String(i+1).padStart(2,'0')">{{m}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">หมวดสินค้า</label><select v-model="filterMetalGroup" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทุกหมวด</option><option v-for="g in allMetalGroups" :key="g" :value="g">{{g}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">สินค้า (ค้น)</label><select v-model="search" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">— ทั้งหมด —</option><option v-for="p in db.products.filter(x=>x && x.active!==false)" :key="p.id" :value="p.name">{{p.code}} · {{p.name}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">Supplier (ฝั่งซื้อ)</label><select v-model="filterSupplierId" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทุก Supplier</option><option v-for="s in db.suppliers.filter(x=>x && x.active!==false)" :key="s.id" :value="s.id">{{s.code}} · {{s.name}}</option></select></div>
+        <div><label class="block text-xs mb-1 text-slate-600">Customer (ฝั่งขาย)</label><select v-model="filterCustomerId" class="w-full px-2 py-1.5 border rounded text-sm"><option value="">ทุก Customer</option><option v-for="c in db.customers.filter(x=>x && x.active!==false)" :key="c.id" :value="c.id">{{c.code}} · {{c.name}}</option></select></div>
+        <div class="md:col-span-2 flex justify-end"><button @click="exportCSV" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm">📥 Export CSV</button></div>
       </div>
-      <!-- 📊 SUMMARY CHARTS — Product -->
-      <div v-if="list.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        <div class="bg-gradient-to-br from-amber-500 via-orange-500 to-red-500 text-white rounded-xl shadow-lg p-4">
-          <div class="text-xs opacity-80">📊 Product Summary</div>
-          <div class="text-3xl font-bold">{{list.length}} <span class="text-base">รายการ</span></div>
-          <div class="text-xs opacity-90 mt-3 space-y-1">
-            <div>📦 ซื้อรวม: <b>{{fmt(list.reduce((s,p)=>s+p.buyQty,0))}}</b> กก.</div>
-            <div>📤 ขายรวม: <b>{{fmt(list.reduce((s,p)=>s+p.sellQty,0))}}</b> กก.</div>
-            <div>💰 GP รวม: <b>{{fmt(list.reduce((s,p)=>s+p.gp,0))}}</b></div>
-            <div>📦 Stock รวม: <b>{{fmt(list.reduce((s,p)=>s+p.stockQty,0))}}</b> กก.</div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-slate-700 mb-3">🏆 Top 5 GP</div>
-          <div class="space-y-2">
-            <div v-for="(p,i) in [...list].sort((a,b)=>b.gp-a.gp).slice(0,5)" :key="p.id" class="text-xs">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-4 text-center font-bold" :class="i===0?'text-amber-500':'text-slate-400'">{{i+1}}</span>
-                <span class="flex-1 truncate">{{p.name}}</span>
-                <span class="font-bold" :class="p.gp>=0?'text-emerald-700':'text-red-600'">{{fmt(p.gp)}}</span>
-              </div>
-              <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div class="bg-gradient-to-r from-amber-400 to-orange-500 h-full" :style="{width: Math.max(0, (p.gp / Math.max(1, ...list.map(x=>x.gp))) * 100) + '%'}"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow p-4">
-          <div class="text-sm font-bold text-slate-700 mb-3">🥧 สัดส่วน Stock Value Top 5</div>
-          <svg viewBox="0 0 200 200" style="width:160px;height:160px;margin:0 auto;display:block">
-            <template v-for="(p,i) in [...list].sort((a,b)=>(b.stockQty*b.wac)-(a.stockQty*a.wac)).slice(0,5)" :key="i">
-              <circle cx="100" cy="100" r="70" fill="none"
-                :stroke="['#f59e0b','#ea580c','#dc2626','#be123c','#9d174d'][i]"
-                stroke-width="40"
-                :stroke-dasharray="((p.stockQty*p.wac)/[...list].sort((a,b)=>(b.stockQty*b.wac)-(a.stockQty*a.wac)).slice(0,5).reduce((s,x)=>s+(x.stockQty*x.wac),0)*440)+' 440'"
-                :stroke-dashoffset="-[...list].sort((a,b)=>(b.stockQty*b.wac)-(a.stockQty*a.wac)).slice(0,i).reduce((s,x)=>s+(x.stockQty*x.wac)/[...list].sort((aa,bb)=>(bb.stockQty*bb.wac)-(aa.stockQty*aa.wac)).slice(0,5).reduce((tt,xx)=>tt+(xx.stockQty*xx.wac),0)*440,0)"
-                transform="rotate(-90 100 100)" />
-            </template>
-            <text x="100" y="95" text-anchor="middle" font-size="9" fill="#64748b">Stock Top 5</text>
-            <text x="100" y="115" text-anchor="middle" font-size="13" font-weight="bold">{{fmt([...list].sort((a,b)=>(b.stockQty*b.wac)-(a.stockQty*a.wac)).slice(0,5).reduce((s,x)=>s+(x.stockQty*x.wac),0))}}</text>
-          </svg>
-        </div>
+      <!-- 📊 V25: Summary KPI (ลบ Top 5 ออก) -->
+      <div v-if="list.length > 0" class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow p-3"><div class="text-xs text-slate-500">รายการ</div><div class="text-xl font-bold">{{list.length}}</div></div>
+        <div class="bg-blue-50 rounded-xl shadow p-3"><div class="text-xs text-blue-600">ซื้อ (กก.)</div><div class="text-xl font-bold text-blue-700">{{fmt(list.reduce((s,p)=>s+p.buyQty,0))}}</div></div>
+        <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">ขาย (กก.)</div><div class="text-xl font-bold text-emerald-700">{{fmt(list.reduce((s,p)=>s+p.sellQty,0))}}</div></div>
+        <div class="bg-blue-50 rounded-xl shadow p-3"><div class="text-xs text-blue-600">ยอดซื้อ</div><div class="text-lg font-bold text-blue-700">{{fmt(list.reduce((s,p)=>s+p.buyAmt,0))}}</div></div>
+        <div class="bg-emerald-50 rounded-xl shadow p-3"><div class="text-xs text-emerald-600">ยอดขาย</div><div class="text-lg font-bold text-emerald-700">{{fmt(list.reduce((s,p)=>s+p.sellRev,0))}}</div></div>
+        <div class="bg-purple-50 rounded-xl shadow p-3"><div class="text-xs text-purple-600">GP</div><div class="text-lg font-bold text-purple-700">{{fmt(list.reduce((s,p)=>s+p.gp,0))}}</div></div>
       </div>
 
-      <div class="flex gap-1 mb-3 flex-wrap">
+      <div class="flex gap-1 mb-3 flex-wrap items-center">
         <button @click="view='list'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='list'?'bg-white border-b-2 border-amber-600 text-amber-700':'bg-slate-100']">📋 รายการ</button>
-        <button @click="view='top10'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='top10'?'bg-white border-b-2 border-amber-600 text-amber-700':'bg-slate-100']">🏆 Top 10 ในหมวด</button>
         <button @click="view='yearCompare'" :class="['px-4 py-2 rounded-t-lg text-sm font-medium', view==='yearCompare'?'bg-white border-b-2 border-amber-600 text-amber-700':'bg-slate-100']">📅 รายปี</button>
+        <div v-if="view==='yearCompare'" class="ml-2 flex border rounded-lg overflow-hidden">
+          <button @click="yearMode='qty'" :class="['px-3 py-1.5 text-xs', yearMode==='qty'?'bg-purple-600 text-white font-bold':'bg-white text-slate-600']">📦 น้ำหนัก</button>
+          <button @click="yearMode='buyAmt'" :class="['px-3 py-1.5 text-xs border-l', yearMode==='buyAmt'?'bg-blue-600 text-white font-bold':'bg-white text-slate-600']">🛒 ยอดซื้อ</button>
+          <button @click="yearMode='sellRev'" :class="['px-3 py-1.5 text-xs border-l', yearMode==='sellRev'?'bg-emerald-600 text-white font-bold':'bg-white text-slate-600']">💰 ยอดขาย</button>
+        </div>
       </div>
 
       <div v-if="view==='list'" class="bg-white rounded-xl shadow overflow-x-auto">
@@ -33516,27 +33887,18 @@ app.component('view-productTracking', {
         </table>
       </div>
 
-      <div v-if="view==='top10'" class="space-y-4">
-        <div v-if="filterMetalGroup" class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800"><strong>📂 หมวด:</strong> {{filterMetalGroup}}</div>
-        <div v-else class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">💡 เลือก "หมวดสินค้า" จากด้านบน เพื่อดู Top 10 เฉพาะหมวด — ตอนนี้แสดง Top 10 จากทุกหมวด</div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-emerald-50">🥇 Top 10 ยอดขายสูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">ยอดขาย</th><th class="p-2 text-right">GP%</th></tr></thead><tbody><tr v-for="(p,i) in top10BySales" :key="p.id" class="border-t cursor-pointer hover:bg-emerald-50/50" @click="selected=p.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{p.name}}</td><td class="p-2 text-right">{{fmt(p.sellQty)}}</td><td class="p-2 text-right text-emerald-700 font-medium">{{fmt(p.sellRev)}}</td><td class="p-2 text-right">{{p.gpPct.toFixed(2)}}%</td></tr></tbody></table></div>
-          <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-purple-50">💰 Top 10 กำไรสูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">GP</th><th class="p-2 text-right">GP%</th></tr></thead><tbody><tr v-for="(p,i) in top10ByGP" :key="p.id" class="border-t cursor-pointer hover:bg-purple-50/50" @click="selected=p.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{p.name}}</td><td class="p-2 text-right text-purple-700 font-bold">{{fmt(p.gp)}}</td><td class="p-2 text-right">{{p.gpPct.toFixed(2)}}%</td></tr></tbody></table></div>
-          <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-blue-50">📈 Top 10 Margin% สูงสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">GP%</th><th class="p-2 text-right">GP</th></tr></thead><tbody><tr v-for="(p,i) in top10ByGPPct" :key="p.id" class="border-t cursor-pointer hover:bg-blue-50/50" @click="selected=p.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{p.name}}</td><td class="p-2 text-right text-blue-700 font-bold">{{p.gpPct.toFixed(2)}}%</td><td class="p-2 text-right">{{fmt(p.gp)}}</td></tr></tbody></table></div>
-          <div class="bg-white rounded-xl shadow overflow-hidden"><h3 class="px-4 py-3 border-b font-semibold bg-slate-50">🛒 Top 10 ซื้อเข้ามากสุด</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">น้ำหนัก</th><th class="p-2 text-right">มูลค่าซื้อ</th></tr></thead><tbody><tr v-for="(p,i) in top10ByBuy" :key="p.id" class="border-t cursor-pointer hover:bg-slate-50/50" @click="selected=p.id"><td class="p-2 font-bold">{{i+1}}</td><td class="p-2">{{p.name}}</td><td class="p-2 text-right">{{fmt(p.buyQty)}}</td><td class="p-2 text-right text-blue-700">{{fmt(p.buyAmt)}}</td></tr></tbody></table></div>
-          <div class="bg-white rounded-xl shadow overflow-hidden lg:col-span-2"><h3 class="px-4 py-3 border-b font-semibold bg-amber-50">🐢 Slow Movers — Stock เยอะ ขายน้อย</h3><table class="w-full text-xs"><thead class="bg-slate-100"><tr><th class="p-2 text-left">สินค้า</th><th class="p-2 text-right">Stock</th><th class="p-2 text-right">Stock Value</th><th class="p-2 text-right">ขายในช่วงนี้</th></tr></thead><tbody><tr v-for="p in slowMovers" :key="p.id" class="border-t cursor-pointer hover:bg-amber-50/50" @click="selected=p.id"><td class="p-2">{{p.name}}</td><td class="p-2 text-right">{{fmt(p.stockQty)}}</td><td class="p-2 text-right text-amber-700 font-bold">{{fmt(p.stockValue)}}</td><td class="p-2 text-right">{{fmt(p.sellQty)}}</td></tr><tr v-if="slowMovers.length===0"><td colspan="4" class="text-center py-4 text-emerald-600">✅ ไม่มี Slow Mover</td></tr></tbody></table></div>
-        </div>
-      </div>
-
       <div v-if="view==='yearCompare'" class="bg-white rounded-xl shadow overflow-x-auto">
-        <h3 class="px-4 py-3 border-b font-semibold bg-amber-50">📅 ตารางยอดขายรายเดือน ปี {{year}}{{filterMetalGroup?' — '+filterMetalGroup:''}} ({{yearCompare.length}} สินค้า)</h3>
+        <h3 class="px-4 py-3 border-b font-semibold bg-amber-50">📅 ตาราง{{yearMode==='qty'?'น้ำหนัก':yearMode==='buyAmt'?'ยอดซื้อ':'ยอดขาย'}}รายเดือน ปี {{year}}{{filterMetalGroup?' — '+filterMetalGroup:''}} ({{yearCompare.length}} สินค้า)</h3>
         <table class="w-full text-xs">
           <thead class="bg-slate-100"><tr><th class="p-2 text-left sticky left-0 bg-slate-100 z-10">สินค้า</th><th v-for="m in TRACKING_MONTHS" :key="m" class="p-2 text-right">{{m}}</th><th class="p-2 text-right bg-amber-100">รวม</th></tr></thead>
           <tbody>
             <tr v-for="p in yearCompare" :key="p.id" class="border-t hover:bg-amber-50/30 cursor-pointer" @click="selected=p.id">
               <td class="p-2 font-medium sticky left-0 bg-white">{{p.name}}</td>
-              <td v-for="(m,i) in p.months" :key="i" class="p-2 text-right" :class="m.sellRev>0?'text-emerald-700':'text-slate-300'">{{m.sellRev>0?fmt(m.sellRev):'-'}}</td>
-              <td class="p-2 text-right font-bold bg-amber-50 text-amber-700">{{fmt(p.total.sellRev)}}</td>
+              <td v-for="(m,i) in p.months" :key="i" class="p-2 text-right"
+                :class="(yearMode==='qty'?m.qtyTotal:yearMode==='buyAmt'?m.buyAmt:m.sellRev)>0?(yearMode==='qty'?'text-purple-700':yearMode==='buyAmt'?'text-blue-700':'text-emerald-700'):'text-slate-300'">
+                {{(yearMode==='qty'?m.qtyTotal:yearMode==='buyAmt'?m.buyAmt:m.sellRev)>0?fmt(yearMode==='qty'?m.qtyTotal:yearMode==='buyAmt'?m.buyAmt:m.sellRev):'-'}}
+              </td>
+              <td class="p-2 text-right font-bold bg-amber-50" :class="yearMode==='qty'?'text-purple-700':yearMode==='buyAmt'?'text-blue-700':'text-emerald-700'">{{fmt(yearMode==='qty'?p.total.qtyTotal:yearMode==='buyAmt'?p.total.buyAmt:p.total.sellRev)}}</td>
             </tr>
             <tr v-if="yearCompare.length===0"><td :colspan="14" class="text-center py-8 text-slate-400">ไม่มีข้อมูล</td></tr>
           </tbody>
@@ -44383,7 +44745,7 @@ function _allMenuItems() {
     // Assets / Loans
     'assetRegister','depreciation','assetDisposal','loanContracts','loanDashboard','equityMaint',
     // Setup / System
-    'openingBalance','historicalData','receiptVoucher','companyProfile','changePassword','transactionLedger','backup','audit','userPermission','userActivity'
+    'openingBalance','historicalData','receiptVoucher','companyProfile','changePassword','lineNotify','transactionLedger','backup','audit','userPermission','userActivity'
   ];
   return known;
 }
@@ -50366,6 +50728,150 @@ app.component('view-backup', {
       </ul>
     </div>
 
+  </div>`
+});
+
+/* =================================================================
+   📱 LINE NOTIFY — V25
+   Setup webhook + event toggles + notification log
+   ================================================================= */
+app.component('view-lineNotify', {
+  setup() {
+    const erp = window.$erp; const db = erp.db;
+    if (!db.lineNotifyConfig) {
+      db.lineNotifyConfig = { enabled:false, webhookUrl:'', defaultGroup:'', events:{}, notifyLog:[] };
+    }
+    const cfg = ref(db.lineNotifyConfig);
+    const testing = ref(false);
+
+    function save() {
+      db.lineNotifyConfig = JSON.parse(JSON.stringify(cfg.value));
+      erp.showToast('✅ บันทึก LINE Notify config แล้ว', 'success');
+    }
+    async function testNotify() {
+      if (!cfg.value.webhookUrl) { alert('กรุณาใส่ Webhook URL ก่อน'); return; }
+      // sync to db first
+      db.lineNotifyConfig = JSON.parse(JSON.stringify(cfg.value));
+      testing.value = true;
+      await erp.notify('TEST', { note: 'ทดสอบจากหน้า Setup' });
+      testing.value = false;
+      cfg.value = db.lineNotifyConfig;  // refresh log
+      const last = (cfg.value.notifyLog||[])[0];
+      if (last?.status === 'ok') erp.showToast('✅ ทดสอบสำเร็จ — เช็คใน LINE Group', 'success');
+      else erp.showToast('❌ ทดสอบไม่ผ่าน: '+(last?.error||last?.code||'unknown'), 'error');
+    }
+    function clearLog() {
+      if (!confirm('ลบประวัติ notification ทั้งหมด?')) return;
+      cfg.value.notifyLog = [];
+      db.lineNotifyConfig.notifyLog = [];
+      erp.showToast('ลบประวัติแล้ว','success');
+    }
+    function toggleAll(on) {
+      Object.keys(cfg.value.events||{}).forEach(k => { cfg.value.events[k].enabled = on; });
+    }
+
+    return { db, erp, cfg, testing, save, testNotify, clearLog, toggleAll, fmt: erp.fmt };
+  },
+  template: `
+  <div>
+    <div class="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl p-5 shadow mb-4">
+      <h1 class="text-2xl font-bold">📱 LINE Notify (แจ้งเข้ากลุ่ม)</h1>
+      <p class="text-sm opacity-90 mt-1">ส่ง notification เข้ากลุ่ม LINE เมื่อมีกิจกรรมในระบบ — ต้อง setup webhook middleware ก่อน (ดู LINE-NOTIFY-SETUP.pdf)</p>
+    </div>
+
+    <!-- Master toggle + webhook -->
+    <div class="bg-white rounded-xl shadow p-4 mb-4 space-y-3">
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" v-model="cfg.enabled" class="w-5 h-5">
+          <span class="font-bold" :class="cfg.enabled?'text-emerald-700':'text-slate-500'">{{cfg.enabled?'✅ เปิดใช้งาน LINE Notify':'⛔ ปิดอยู่'}}</span>
+        </label>
+        <span class="text-xs text-slate-500">— ปิด/เปิดทั้งระบบ; event แต่ละตัวเปิด/ปิดได้ด้านล่าง</span>
+      </div>
+      <div>
+        <label class="text-xs text-slate-600">Webhook URL (n8n / Make / Supabase Edge Function) *</label>
+        <input v-model="cfg.webhookUrl" placeholder="https://your-n8n.com/webhook/ns-line-notify" class="w-full px-3 py-2 border rounded font-mono text-sm">
+        <div class="text-xs text-slate-500 mt-1">💡 ระบบจะ POST JSON ไปยัง URL นี้ — middleware รับแล้วต่อยอด LINE Messaging API push</div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-600">LINE Group ID (optional — middleware รู้เอง หรือใส่ในนี้ส่งไปด้วย)</label>
+        <input v-model="cfg.defaultGroup" placeholder="C12345... (Group ID จาก LINE)" class="w-full px-3 py-2 border rounded font-mono text-sm">
+      </div>
+      <div class="flex gap-2">
+        <button @click="save" class="bg-emerald-600 text-white px-4 py-2 rounded font-bold">💾 บันทึก Config</button>
+        <button @click="testNotify" :disabled="testing||!cfg.enabled" class="bg-blue-600 text-white px-4 py-2 rounded font-bold disabled:opacity-50">{{testing?'⏳ กำลังทดสอบ...':'🧪 ทดสอบส่ง'}}</button>
+      </div>
+    </div>
+
+    <!-- Event toggles -->
+    <div class="bg-white rounded-xl shadow p-4 mb-4">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="font-bold">🔔 เลือกกิจกรรมที่จะแจ้งเตือน</h3>
+        <div class="flex gap-2">
+          <button @click="toggleAll(true)" class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded text-xs font-bold">✅ เปิดทั้งหมด</button>
+          <button @click="toggleAll(false)" class="bg-red-100 text-red-700 px-3 py-1 rounded text-xs font-bold">⛔ ปิดทั้งหมด</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <label v-for="(ev, key) in cfg.events" :key="key"
+          class="flex items-center gap-2 p-2 border rounded hover:bg-slate-50 cursor-pointer"
+          :class="ev.enabled?'border-emerald-300 bg-emerald-50/30':'border-slate-200'">
+          <input type="checkbox" v-model="ev.enabled" class="w-4 h-4">
+          <span class="text-sm flex-1">{{ev.label}}</span>
+          <span class="text-[10px] font-mono text-slate-400">{{key}}</span>
+        </label>
+      </div>
+      <div class="mt-3 text-xs text-slate-500">💡 อย่าเปิดทุก event — ระบบจะส่งข้อความเข้ากลุ่มเยอะมาก; เลือกเฉพาะที่ต้องการ</div>
+    </div>
+
+    <!-- Notification log -->
+    <div class="bg-white rounded-xl shadow p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-bold">📜 ประวัติการแจ้งเตือน ({{(cfg.notifyLog||[]).length}})</h3>
+        <button @click="clearLog" class="text-red-600 text-xs hover:underline">🗑 ลบประวัติทั้งหมด</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-100">
+            <tr>
+              <th class="p-2 text-left">เวลา</th>
+              <th class="p-2 text-left">Event</th>
+              <th class="p-2 text-left">ข้อความ (ตัด)</th>
+              <th class="p-2 text-center">สถานะ</th>
+              <th class="p-2 text-left">Error / Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r,i) in (cfg.notifyLog||[]).slice(0,100)" :key="i" class="border-t">
+              <td class="p-2 text-slate-500 whitespace-nowrap">{{new Date(r.ts).toLocaleString('th-TH').slice(0,17)}}</td>
+              <td class="p-2 font-mono">{{r.event}}</td>
+              <td class="p-2 text-slate-700">{{r.message}}</td>
+              <td class="p-2 text-center">
+                <span class="px-2 py-0.5 rounded text-xs font-bold"
+                  :class="r.status==='ok'?'bg-emerald-100 text-emerald-700':r.status==='sending'?'bg-amber-100 text-amber-700':'bg-red-100 text-red-700'">
+                  {{r.status}}
+                </span>
+              </td>
+              <td class="p-2 text-red-600 text-xs">{{r.error || (r.code?'HTTP '+r.code:'-')}}</td>
+            </tr>
+            <tr v-if="!(cfg.notifyLog||[]).length"><td colspan="5" class="text-center py-6 text-slate-400">ยังไม่มีประวัติ — กด "ทดสอบส่ง" เพื่อเริ่ม</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Help notes -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4 text-xs text-blue-900">
+      <div class="font-bold mb-1">📚 วิธีใช้งาน</div>
+      <ol class="list-decimal ml-5 space-y-0.5">
+        <li>สร้าง LINE Official Account + Channel access token (ดูคู่มือ LINE-NOTIFY-SETUP.pdf)</li>
+        <li>เพิ่ม Bot เข้ากลุ่ม LINE ที่ต้องการรับแจ้ง</li>
+        <li>สร้าง webhook middleware (n8n / Make / Supabase Edge Function) ที่รับ JSON จากระบบ แล้ว POST ต่อยอด LINE Messaging API</li>
+        <li>เอา URL ของ webhook มาใส่ในช่อง "Webhook URL" ด้านบน</li>
+        <li>เปิด toggle "เปิดใช้งาน" → กด "🧪 ทดสอบส่ง" → เช็คในกลุ่ม LINE</li>
+        <li>เลือก event ที่ต้องการแจ้งเตือน → ระบบจะส่งอัตโนมัติเมื่อเกิดเหตุการณ์</li>
+      </ol>
+    </div>
   </div>`
 });
 
