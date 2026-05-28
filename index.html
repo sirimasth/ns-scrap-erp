@@ -29549,13 +29549,12 @@ app.component('view-pendingSales', {
         const prod = _trkSafe(db.products).find(x => x && x.id === p.productId);
         const cust = _trkSafe(db.customers).find(x => x && x.id === p.customerId);
         const metalGroup = prod?.metalGroup || '';
-        const isLocked = p.status === 'locked';
-        /* 🆕 V18: ใช้ cfLme (ราคา LME ที่ broker confirm มาแล้ว) ถ้ากรอกไว้, ไม่งั้นใช้ market */
+        const isLocked = p.status === 'locked';   // 📷 V27: locked = % ถูก lock แล้ว, LME+FX ยัง live
+        /* 📷 V27: cfLme = ราคา LME ที่ broker confirm (override market). FX = live ทุกกรณี.
+           กฎใหม่: Lock ไม่ snapshot LME+FX อีกแล้ว → ราคาไทยขึ้นลงตาม LME+USD ปัจจุบัน */
         const cfLme = Number(p.cfLme||0);
-        const lme = isLocked
-          ? Number(p.lockedLme||0)
-          : (cfLme > 0 ? cfLme : lmeBaseSP(metalGroup));
-        const fx = isLocked ? Number(p.lockedFx||0) : Number(db.lmeConfig.fxRate||0);
+        const lme = cfLme > 0 ? cfLme : lmeBaseSP(metalGroup);
+        const fx = Number(db.lmeConfig.fxRate||0);   // live FX
         const sellPctLme = Number(p.sellPctLme||0);
         const totalKg = Number(p.containers||0) * Number(p.kgPerContainer||db.lmeConfig.kgPerContainer||25000);
         const sellPrice = lme > 0 && fx > 0 && sellPctLme > 0 ? (lme/1000) * fx * sellPctLme/100 : 0;
@@ -29602,18 +29601,17 @@ app.component('view-pendingSales', {
       const target = db.salesPlans[idx];
       if (target.status === 'locked') {
         target.status = 'pending'; target.lockedAt = null; planSave();
-        erp.showToast('🔓 ปลดล็อก','success');
+        erp.showToast('🔓 ปลดล็อก % แล้ว','success');
       } else {
+        /* 📷 V27: Lock = ล็อคเฉพาะ % ที่ลูกค้าจอง — LME+FX ยัง live (ราคาไทยขึ้น/ลงได้) */
         const prod = _trkSafe(db.products).find(x => x && x.id === target.productId);
         if (!prod) { alert('เลือกสินค้าก่อนล็อก'); return; }
         if (Number(target.sellPctLme||0) <= 0) { alert('กรอก % LME ก่อนล็อก'); return; }
-        /* 🆕 V18: ถ้ามี cfLme ที่ broker confirm ใช้ค่านั้นเป็น lockedLme */
-        if (Number(target.lockedLme||0) <= 0) target.lockedLme = Number(target.cfLme||0) > 0 ? Number(target.cfLme) : lmeBaseSP(prod.metalGroup);
-        if (Number(target.lockedFx||0) <= 0) target.lockedFx = Number(db.lmeConfig.fxRate||0);
-        target.status = 'locked'; target.lockedAt = new Date().toISOString();
+        target.status = 'locked';
+        target.lockedAt = new Date().toISOString();
+        target.lockedPctLme = Number(target.sellPctLme);   // snapshot % ที่ lock (สำหรับ audit)
         planSave();
-        const price = (target.lockedLme/1000)*target.lockedFx*target.sellPctLme/100;
-        erp.showToast('🔒 ล็อกที่ '+erp.fmt(price)+' ฿/กก.','success');
+        erp.showToast('🔒 ล็อค % LME ที่ '+target.sellPctLme+'% (ราคาไทย live ตาม LME+USD)','success');
       }
     }
     /* 🆕 V12+V16 (2026-05-24): QUICK BOOK PO SELL — ใส่ LME + % LME (ไม่ใช่ USD/kg แล้ว) */
@@ -29663,9 +29661,14 @@ app.component('view-pendingSales', {
         if (existing) { alert('PO Sell ของแผนนี้สร้างไว้แล้ว: '+existing.docNo); return; }
         const kg = Number(p.containers||0) * Number(p.kgPerContainer||db.lmeConfig.kgPerContainer||25000);
         if (kg <= 0) { alert('จำนวน กก. เป็น 0'); return; }
-        const lme = Number(p.lockedLme||0); const fx = Number(p.lockedFx||0); const pct = Number(p.sellPctLme||0);
+        /* 📷 V27: ตอนเปิด PO Sell ใช้ LME+FX ปัจจุบัน (snapshot ตอนทำสัญญา) — ไม่ใช้ lockedLme/lockedFx ของ plan แล้ว */
+        const prod = _trkSafe(db.products).find(x => x && x.id === p.productId);
+        const cfLme = Number(p.cfLme||0);
+        const lme = cfLme > 0 ? cfLme : lmeBaseSP(prod?.metalGroup || '');
+        const fx = Number(db.lmeConfig.fxRate||0);
+        const pct = Number(p.sellPctLme||0);
         const pricePerKg = (lme/1000) * fx * pct/100;
-        if (pricePerKg <= 0) { alert('ราคาคำนวณ = 0'); return; }
+        if (pricePerKg <= 0) { alert('ราคาคำนวณ = 0 — ตรวจ LME / FX / %LME'); return; }
         if (!confirm(`เปิด PO ขายจากแผนนี้?\n\nสินค้า: ${erp.productName(p.productId)}\nลูกค้า: ${erp.customerName(p.customerId)}\nจำนวน: ${kg.toLocaleString('th-TH')} กก. (${p.containers} ตู้)\n%LME: ${pct}%\nราคา: ${pricePerKg.toFixed(2)} ฿/กก.\nรวม: ${(kg*pricePerKg).toLocaleString('th-TH')} ฿`)) return;
         const docNo = erp.nextDocNo ? erp.nextDocNo('POS') : 'POS-Q-'+Date.now();
         const newPO = {
@@ -29774,8 +29777,8 @@ app.component('view-pendingSales', {
     /* enrichedPendingSale — ใส่ bestPlanPrice + comparison vs Cost Pool avg cost */
     const pendingSaleEnriched = computed(() => {
       return pendingSaleTable.value
-        /* 🆕 V18 (2026-05-24): ซ่อนแถวที่ไม่มี pendingSaleQty (ของใน pool หมดแล้ว) — กันการแสดง "ต้นทุน Pool" โดยไม่มีของ */
-        .filter(r => Number(r.pendingSaleQty||0) > 0.01)
+        /* 📷 V27: ซ่อนแถวที่ไม่มี pendingSaleQty — เว้นแต่ติดลบ (ของขาด ต้องโชว์) */
+        .filter(r => Number(r.pendingSaleQty||0) > 0.01 || Number(r.realPendingSale||0) < 0)
         .map(r => {
           const best = bestPlanPriceFor(r.productId);
           // ราคาต้นทุน Cost Pool (avg) — ใช้ pool avg ของสินค้านี้
@@ -29968,12 +29971,13 @@ app.component('view-pendingSales', {
             stockWAC: r.stockWAC,
           };
         })
-        // ซ่อนแถวที่ทุกค่าเป็น 0
-        .filter(r => r.pendingSaleQty>0 || r.lockedSell>0 || r.lockedBuy>0 || r.stock>0)
+        // 📷 V27: ซ่อนเฉพาะแถวที่ทุกค่าเป็น 0 จริงๆ — ถ้าติดลบให้โชว์
+        .filter(r => r.pendingSaleQty>0 || r.lockedSell>0 || r.lockedBuy>0 || r.stock>0 || r.realPendingSale<0)
         // เรียงตามขาด (รอขายจริง ติดลบมากสุดขึ้นก่อน) แล้วตาม pendingSaleValue
         .sort((a,b) => {
           if (a.realPendingSale<0 && b.realPendingSale>=0) return -1;
           if (b.realPendingSale<0 && a.realPendingSale>=0) return 1;
+          if (a.realPendingSale<0 && b.realPendingSale<0) return a.realPendingSale - b.realPendingSale;
           return b.pendingSaleValue - a.pendingSaleValue;
         });
       return rows;
@@ -30269,7 +30273,12 @@ app.component('view-pendingSales', {
       <div class="px-4 py-3 border-b bg-gradient-to-r from-amber-50 to-orange-50 flex justify-between items-center flex-wrap gap-2">
         <div>
           <h3 class="font-bold text-amber-900">📋 วางแผนการขาย (Sales Plan) — Seller Option · ทองแดง / ทองเหลือง</h3>
-          <p class="text-xs text-amber-700">ลูกค้าเสนอ % LME มา · เรารอ lock spot LME ตาม % นั้น (seller option) · <b>กรอก LME cf</b> ถ้า broker confirm ราคามาแล้ว · 🔒 Lock เพื่อยืนยัน · เปิด PO ขาย → แผนจะหายจากหน้านี้</p>
+          <p class="text-xs text-amber-700">
+            <b>🟢 ราคาไทยบาท Live</b> ขึ้น/ลงตาม LME + USD ปัจจุบัน เสมอ ·
+            กรอก <b>% LME</b> ที่ลูกค้าจอง · ใส่ <b>LME cf</b> ถ้า broker confirm ราคามาแล้ว (override market) ·
+            กด <b>🔒 Lock</b> = ล็อคแค่ % ที่ลูกค้าจอง <span class="text-red-700">(ราคาไทยยังเปลี่ยนตาม LME+USD)</span> ·
+            เปิด PO ขาย → ตอนนั้นถึงจะ snapshot LME+FX จริง
+          </p>
         </div>
         <button @click="planAdd" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ เพิ่มแผน</button>
       </div>
@@ -30336,11 +30345,13 @@ app.component('view-pendingSales', {
               </td>
               <td class="p-1 text-right font-bold bg-emerald-50 text-emerald-700">
                 {{row.sellPrice?fmt(row.sellPrice):'-'}}
-                <div v-if="row.lmeIsManual && !row.isLocked" class="text-[10px] font-normal text-blue-600">🔵 จาก cf</div>
+                <div class="text-[10px] font-normal text-emerald-600">🟢 Live · LME×FX×%</div>
+                <div v-if="row.lmeIsManual" class="text-[10px] font-normal text-blue-600">🔵 LME จาก cf</div>
               </td>
               <td class="p-1 text-center">
-                <button @click="planLock(row.p)" :class="['px-2 py-1 rounded text-xs font-medium w-full', row.isLocked?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:bg-amber-200']">
-                  {{row.isLocked?'🔒 Locked':'⏳ Pending'}}
+                <button @click="planLock(row.p)" :class="['px-2 py-1 rounded text-xs font-medium w-full', row.isLocked?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:bg-amber-200']"
+                  :title="row.isLocked?'% LME ถูกล็อคแล้ว — ราคาไทยยัง live':'กด Lock = ล็อคแค่ % LME (ราคาไทยยัง live)'">
+                  {{row.isLocked?'🔒 Locked %':'⏳ Pending'}}
                 </button>
               </td>
               <td class="p-1 text-center">
